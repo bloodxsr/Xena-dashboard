@@ -1,4 +1,4 @@
-# Fluxer Dashboard TS
+# Xena Dashboard TS
 
 Standalone Next.js dashboard product for managing Fluxer bot operations across shared guilds.
 
