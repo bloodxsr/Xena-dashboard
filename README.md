@@ -2,9 +2,9 @@
 
 Standalone Next.js dashboard product for managing Fluxer bot operations across shared guilds.
 
-## Why PostgreSQL
+## Why PostgreSQL (Production Default)
 
-For a sellable dashboard, PostgreSQL is the best fit here because it gives you reliable concurrent writes, safe schema evolution, backups/replicas, and managed-hosting compatibility. SQLite is still supported for local development.
+For production deployments, PostgreSQL is the default for operational reliability and easier managed-host scaling. SQLite remains available for local development and single-node setups.
 
 ## Core Features
 
@@ -38,25 +38,35 @@ npm run dev
 
 5. Open `http://localhost:3000`.
 
-## Production Database (Recommended)
+## Production Database (Current Default)
 
 Set:
 
 - `DASHBOARD_DB_DRIVER=postgres`
-- `DASHBOARD_SESSION_SECRET` (use a random value with at least 32 characters)
 - `POSTGRES_HOST`
 - `POSTGRES_PORT`
 - `POSTGRES_USER`
 - `POSTGRES_PASSWORD`
 - `POSTGRES_DATABASE`
+- `DASHBOARD_SESSION_SECRET` (use a random value with at least 32 characters)
 
 The dashboard auto-creates required tables on first startup.
 
-## SQLite Fallback
+## Optional SQLite Mode
 
-For local-only setups:
+For local/single-node use:
 
 - `DASHBOARD_DB_DRIVER=sqlite`
 - `BOT_DB_PATH=../bot_js/data/warnings.db`
+
+## Deploying as a Sellable Product
+
+- Container deploy: use `Dockerfile` and `docker-compose.yml` in this folder.
+- White-label branding: set `DASHBOARD_BRAND_NAME`.
+- Use persistent storage and backups for PostgreSQL.
+- For managed PostgreSQL, enforce TLS (`POSTGRES_SSL_MODE=required`).
+- Keep OAuth redirect URL aligned with your public dashboard domain.
+- Do not deploy with localhost callback URLs or placeholder secrets.
+- `docker-compose.yml` defaults to PostgreSQL service + dashboard.
 
 See `COMMERCIALIZATION.md` for productization checklist.

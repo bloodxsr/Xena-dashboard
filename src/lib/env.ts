@@ -54,7 +54,8 @@ function assertEnvValuePresent(name: string, value: string): void {
 }
 
 function parseDbDriver(value: string | undefined): DashboardDbDriver {
-  return String(value || "postgres").trim().toLowerCase() === "sqlite" ? "sqlite" : "postgres";
+  const normalized = String(value || "postgres").trim().toLowerCase();
+  return normalized === "sqlite" ? "sqlite" : "postgres";
 }
 
 function parsePostgresSslMode(value: string | undefined): PostgresSslMode {
