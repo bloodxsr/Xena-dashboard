@@ -59,13 +59,4 @@ For local-only setups:
 - `DASHBOARD_DB_DRIVER=sqlite`
 - `BOT_DB_PATH=../bot_js/data/warnings.db`
 
-## Deploying as a Sellable Product
-
-- Container deploy: use `Dockerfile` and `docker-compose.yml` in this folder.
-- White-label branding: set `DASHBOARD_BRAND_NAME`.
-- Use managed PostgreSQL and TLS in production (`POSTGRES_SSL_MODE=required`).
-- Keep OAuth redirect URL aligned with your public dashboard domain.
-- Do not deploy with localhost callback URLs or placeholder secrets.
-- `docker-compose.yml` requires `POSTGRES_PASSWORD` from environment or `.env`.
-
 See `COMMERCIALIZATION.md` for productization checklist.
