@@ -1,42 +1,47 @@
 import crypto from "node:crypto";
+import { NextRequest, NextResponse } from "next/server";
+import { env } from "@/lib/env";
+import type { DashboardSession } from "@/lib/types";
 
-import { getEnv } from "@/lib/env";
-import type { SessionPayload } from "@/lib/types";
-
-export const SESSION_COOKIE_NAME = "fx_dash_session";
-export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 8;
+const SESSION_COOKIE_NAME = "fluxer_dashboard_session";
 
 function encodeBase64Url(value: string): string {
-  return Buffer.from(value, "utf-8").toString("base64url");
+  return Buffer.from(value, "utf-8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 }
 
 function decodeBase64Url(value: string): string {
-  return Buffer.from(value, "base64url").toString("utf-8");
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padLength = (4 - (normalized.length % 4)) % 4;
+  return Buffer.from(`${normalized}${"=".repeat(padLength)}`, "base64").toString("utf-8");
 }
 
-function signPayload(encodedPayload: string): string {
-  return crypto.createHmac("sha256", getEnv().sessionSecret).update(encodedPayload).digest("base64url");
+function sign(raw: string): string {
+  return crypto.createHmac("sha256", env.dashboardSessionSecret).update(raw).digest("base64url");
 }
 
-export function createSessionToken(userId: number, username: string, accessToken: string): string {
-  const issuedAt = Math.floor(Date.now() / 1000);
-  const expiresAt = issuedAt + SESSION_MAX_AGE_SECONDS;
+function timingSafeEqualString(expected: string, provided: string): boolean {
+  const expectedBuffer = Buffer.from(expected, "utf8");
+  const providedBuffer = Buffer.from(provided, "utf8");
 
-  const payload: SessionPayload = {
-    userId,
-    username,
-    accessToken,
-    issuedAt,
-    expiresAt
-  };
+  if (expectedBuffer.length !== providedBuffer.length) {
+    return false;
+  }
 
-  const encoded = encodeBase64Url(JSON.stringify(payload));
-  const signature = signPayload(encoded);
+  return crypto.timingSafeEqual(expectedBuffer, providedBuffer);
+}
+
+export function createSessionToken(session: DashboardSession): string {
+  const encoded = encodeBase64Url(JSON.stringify(session));
+  const signature = sign(encoded);
   return `${encoded}.${signature}`;
 }
 
-export function parseSessionToken(token: string | null | undefined): SessionPayload | null {
-  if (!token) {
+export function parseSessionToken(token: string | undefined | null): DashboardSession | null {
+  if (!token || !token.includes(".")) {
     return null;
   }
 
@@ -45,32 +50,52 @@ export function parseSessionToken(token: string | null | undefined): SessionPayl
     return null;
   }
 
-  const expectedSignature = signPayload(encoded);
-  const sigBuffer = Buffer.from(signature, "utf-8");
-  const expectedBuffer = Buffer.from(expectedSignature, "utf-8");
-
-  if (sigBuffer.length !== expectedBuffer.length) {
-    return null;
-  }
-
-  if (!crypto.timingSafeEqual(sigBuffer, expectedBuffer)) {
+  if (!timingSafeEqualString(sign(encoded), signature)) {
     return null;
   }
 
   try {
-    const payload = JSON.parse(decodeBase64Url(encoded)) as SessionPayload;
-    const now = Math.floor(Date.now() / 1000);
-
-    if (!payload.userId || !payload.username || !payload.accessToken) {
+    const parsed = JSON.parse(decodeBase64Url(encoded)) as DashboardSession;
+    const expiresAtMs = Date.parse(String(parsed.expiresAt || ""));
+    if (!Number.isFinite(expiresAtMs) || Date.now() >= expiresAtMs) {
       return null;
     }
 
-    if (payload.expiresAt <= now) {
+    if (!parsed.userId || !parsed.accessToken) {
       return null;
     }
 
-    return payload;
+    return parsed;
   } catch {
     return null;
   }
+}
+
+export function readSessionFromRequest(request: NextRequest): DashboardSession | null {
+  const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+  return parseSessionToken(token);
+}
+
+export function writeSessionCookie(response: NextResponse, session: DashboardSession): void {
+  response.cookies.set({
+    name: SESSION_COOKIE_NAME,
+    value: createSessionToken(session),
+    httpOnly: true,
+    secure: env.nodeEnv === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: env.dashboardSessionTtlSeconds
+  });
+}
+
+export function clearSessionCookie(response: NextResponse): void {
+  response.cookies.set({
+    name: SESSION_COOKIE_NAME,
+    value: "",
+    httpOnly: true,
+    secure: env.nodeEnv === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: 0
+  });
 }

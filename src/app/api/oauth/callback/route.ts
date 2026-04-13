@@ -1,4 +1,4 @@
-import type { NextRequest } from "next/server";
+import { NextRequest } from "next/server";
 import { handleOAuthCallback } from "@/lib/oauth-callback-handler";
 
 export const runtime = "nodejs";

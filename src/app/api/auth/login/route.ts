@@ -1,124 +1,60 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { assertFluxerOAuthConfigured } from "@/lib/env";
+import { buildFluxerAuthorizeUrl } from "@/lib/fluxer";
+import { createSignedOAuthState } from "@/lib/oauth-state";
+import { consumeRateLimit, getClientIp } from "@/lib/rate-limit";
 
-import { getEnv } from "@/lib/env";
-import { buildFluxerLoginUrl } from "@/lib/fluxer";
-import { sanitizeNextPath } from "@/lib/next-path";
-import { createOauthState } from "@/lib/oauth-state";
+const OAUTH_STATE_COOKIE = "fluxer_dashboard_oauth_state";
 
-function redirectToPath(path: string, status = 303): NextResponse {
-  const response = new NextResponse(null, { status });
-  response.headers.set("Location", path);
-  return response;
-}
+export const runtime = "nodejs";
 
-function redirectToAbsolute(url: string, status = 303): NextResponse {
-  const response = new NextResponse(null, { status });
-  response.headers.set("Location", url);
-  return response;
-}
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  const clientIp = getClientIp(request);
+  const loginLimit = consumeRateLimit(`auth-login:${clientIp}`, {
+    windowMs: 10 * 60 * 1000,
+    maxHits: 20,
+    blockDurationMs: 10 * 60 * 1000
+  });
 
-function buildLoginPath(nextPath: string, errorCode: string): string {
-  const params = new URLSearchParams({ error: errorCode });
-  if (nextPath !== "/dashboard") {
-    params.set("next", nextPath);
+  if (!loginLimit.allowed) {
+    return NextResponse.json(
+      {
+        error: "Too many login attempts. Please retry later."
+      },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(loginLimit.retryAfterSeconds)
+        }
+      }
+    );
   }
-  return `/login?${params.toString()}`;
-}
-
-async function extractLoginInput(
-  request: Request,
-  url: URL
-): Promise<{ nextPath: string; providedKey: string }> {
-  const nextFromQuery = url.searchParams.get("next");
-  const keyFromQuery = (url.searchParams.get("key") ?? "").trim();
-
-  if (request.method !== "POST") {
-    return {
-      nextPath: sanitizeNextPath(nextFromQuery),
-      providedKey: keyFromQuery
-    };
-  }
-
-  let nextRaw = nextFromQuery;
-  let providedKey = keyFromQuery;
 
   try {
-    const form = await request.formData();
-    const formNext = form.get("next");
-    const formKey = form.get("key");
+    assertFluxerOAuthConfigured();
 
-    if (typeof formNext === "string") {
-      nextRaw = formNext;
-    }
-    if (typeof formKey === "string") {
-      providedKey = formKey.trim();
-    }
-  } catch {
-    // Fall back to query values when no form body is available.
+    const state = createSignedOAuthState(600);
+    const redirectUrl = buildFluxerAuthorizeUrl(state);
+
+    const response = NextResponse.redirect(redirectUrl);
+    response.cookies.set({
+      name: OAUTH_STATE_COOKIE,
+      value: state,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: 600
+    });
+
+    return response;
+  } catch (error) {
+    console.error("auth login route failed", error);
+    return NextResponse.json(
+      {
+        error: "Authentication service unavailable."
+      },
+      { status: 500 }
+    );
   }
-
-  return {
-    nextPath: sanitizeNextPath(nextRaw),
-    providedKey
-  };
-}
-
-async function handleLogin(request: Request): Promise<NextResponse> {
-  const url = new URL(request.url);
-  const { nextPath, providedKey } = await extractLoginInput(request, url);
-
-  const env = getEnv();
-  const appOrigin = new URL(env.appBaseUrl).origin;
-  if (url.origin !== appOrigin) {
-    const canonicalUrl = new URL("/api/auth/login", env.appBaseUrl);
-    canonicalUrl.searchParams.set("next", nextPath);
-    if (providedKey) {
-      canonicalUrl.searchParams.set("key", providedKey);
-    }
-    return redirectToAbsolute(canonicalUrl.toString());
-  }
-
-  const oauthConfigured = Boolean(env.fluxerClientId && env.fluxerClientSecret);
-  if (!oauthConfigured) {
-    return redirectToPath(buildLoginPath(nextPath, "oauth_config_missing"));
-  }
-
-  if (env.fluxerDashboardKey) {
-    if (!providedKey) {
-      return redirectToPath(buildLoginPath(nextPath, "key_required"));
-    }
-
-    if (providedKey !== env.fluxerDashboardKey) {
-      return redirectToPath(buildLoginPath(nextPath, "key_invalid"));
-    }
-  }
-
-  const state = createOauthState(nextPath);
-  const response = new NextResponse(null, { status: 303 });
-  response.headers.set("Location", buildFluxerLoginUrl(state));
-
-  response.cookies.set("fx_oauth_state", state, {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 60 * 10,
-    secure: url.protocol === "https:"
-  });
-  response.cookies.set("fx_oauth_next", nextPath, {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 60 * 10,
-    secure: url.protocol === "https:"
-  });
-
-  return response;
-}
-
-export async function GET(request: Request) {
-  return handleLogin(request);
-}
-
-export async function POST(request: Request) {
-  return handleLogin(request);
 }

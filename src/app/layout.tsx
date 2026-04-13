@@ -1,33 +1,54 @@
 import type { Metadata } from "next";
-import { Inter, Space_Mono } from "next/font/google";
-
-import CinematicNav from "@/components/CinematicNav";
-
+import Link from "next/link";
+import { env } from "@/lib/env";
 import "./globals.css";
 
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-  weight: ["300", "400", "700"]
-});
-
-const spaceMono = Space_Mono({
-  subsets: ["latin"],
-  weight: ["400"],
-  variable: "--font-space-mono"
-});
-
 export const metadata: Metadata = {
-  title: "Fluxer Security Deck",
-  description: "TypeScript security dashboard for raid defense and verification workflows"
+  title: `${env.dashboardBrandName} Dashboard`,
+  description: "Control moderation, raid gate, command toggles, and message templates."
 };
 
+function resolveCanonicalOrigin(): string {
+  try {
+    return new URL(env.fluxerRedirectUri).origin;
+  } catch {
+    return "";
+  }
+}
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const canonicalOrigin = resolveCanonicalOrigin();
+  const canonicalScript =
+    canonicalOrigin &&
+    `(() => {
+  const targetOrigin = ${JSON.stringify(canonicalOrigin)};
+  if (!targetOrigin || typeof window === "undefined") {
+    return;
+  }
+
+  if (window.location.origin !== targetOrigin) {
+    window.location.replace(targetOrigin + window.location.pathname + window.location.search + window.location.hash);
+  }
+})();`;
+
   return (
     <html lang="en">
-      <body className={`${inter.variable} ${spaceMono.variable} antialiased`}>
-        <CinematicNav />
-        <main className="shell">{children}</main>
+      <body>
+        {canonicalScript ? <script dangerouslySetInnerHTML={{ __html: canonicalScript }} /> : null}
+        <header className="top-nav">
+          <Link href="/" className="brand">
+            {env.dashboardBrandName}
+          </Link>
+          <nav className="nav-actions">
+            <Link href="/dashboard" className="btn">
+              Dashboard
+            </Link>
+            <a href="/api/auth/login" className="btn primary">
+              Connect Fluxer
+            </a>
+          </nav>
+        </header>
+        {children}
       </body>
     </html>
   );

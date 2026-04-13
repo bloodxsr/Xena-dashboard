@@ -1,415 +1,217 @@
-import { getEnv } from "@/lib/env";
-import { parseSnowflake } from "@/lib/snowflake";
-import type { FluxerGuildOAuth, FluxerUser, GuildRole } from "@/lib/types";
+import crypto from "node:crypto";
+import { env } from "@/lib/env";
+import type { FluxerGuild, FluxerUser } from "@/lib/types";
 
-type FluxerTokenResponse = {
-  access_token: string;
-  token_type?: string;
-  expires_in?: number;
-  refresh_token?: string;
-  scope?: string;
-};
+const PERMISSION_ADMINISTRATOR = 0x8n;
+const PERMISSION_MANAGE_GUILD = 0x20n;
 
-type FluxerMessageLike = {
-  id?: string | number | null;
-};
-
-function oauthRedirectUri(): string {
-  const env = getEnv();
-  if (env.fluxerRedirectUri) {
-    return env.fluxerRedirectUri;
-  }
-  return `${env.appBaseUrl}/oauth/callback`;
+function toSnowflake(value: unknown): string | null {
+  const text = String(value ?? "").trim();
+  return /^\d{5,22}$/.test(text) ? text : null;
 }
 
-function requireOauthClientConfig(): { clientId: string; clientSecret: string } {
-  const env = getEnv();
-  const clientId = env.fluxerClientId ?? "";
-  const clientSecret = env.fluxerClientSecret ?? "";
-
-  if (!clientId || !clientSecret) {
-    throw new Error("Fluxer OAuth client is not configured");
+function toPermissionsBitfield(value: unknown): bigint {
+  try {
+    const text = String(value ?? "0").trim();
+    return BigInt(text || "0");
+  } catch {
+    return 0n;
   }
-
-  return { clientId, clientSecret };
 }
 
-function requireBotToken(): string {
-  const token = getEnv().botToken;
-  if (!token) {
-    throw new Error("FLUXER_BOT_TOKEN (or BOT_TOKEN) is required for bot control actions");
-  }
-  return token;
-}
-
-function parseApiErrorText(payload: unknown): string | null {
-  if (!payload || typeof payload !== "object") {
+function normalizeGuild(raw: unknown): FluxerGuild | null {
+  const item = raw as Record<string, unknown>;
+  const id = toSnowflake(item?.id);
+  const name = String(item?.name || "").trim();
+  if (!id || !name) {
     return null;
   }
 
-  const data = payload as Record<string, unknown>;
-  const message = data.message;
-  if (typeof message === "string" && message.trim()) {
-    return message;
-  }
-
-  const description = data.error_description;
-  if (typeof description === "string" && description.trim()) {
-    return description;
-  }
-
-  const error = data.error;
-  if (typeof error === "string" && error.trim()) {
-    return error;
-  }
-
-  return null;
-}
-
-async function requestFluxerApi(
-  path: string,
-  authorization: string,
-  init?: RequestInit
-): Promise<{ ok: boolean; status: number; body: unknown }> {
-  const env = getEnv();
-  const headers = new Headers(init?.headers ?? {});
-  headers.set("Authorization", authorization);
-
-  if (init?.body != null && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
-
-  const response = await fetch(`${env.fluxerApiBase}${path}`, {
-    ...init,
-    headers,
-    cache: "no-store"
-  });
-
-  const text = await response.text();
-  let body: unknown = null;
-
-  if (text) {
-    try {
-      body = JSON.parse(text);
-    } catch {
-      body = null;
-    }
-  }
+  const iconHash = String(item?.icon || "").trim();
+  const iconUrl =
+    typeof item?.icon_url === "string" && item.icon_url.trim()
+      ? item.icon_url.trim()
+      : iconHash
+        ? `https://cdn.discordapp.com/icons/${id}/${iconHash}.png?size=256`
+        : null;
 
   return {
-    ok: response.ok,
-    status: response.status,
-    body
+    id,
+    name,
+    iconUrl,
+    permissions: String(item?.permissions || item?.permissions_new || "0")
   };
 }
 
-function auditLogHeaders(reason: string | null | undefined): Record<string, string> {
-  const cleaned = String(reason ?? "").trim();
-  if (!cleaned) {
-    return {};
+function normalizeUser(raw: unknown): FluxerUser {
+  const item = raw as Record<string, unknown>;
+  const id = toSnowflake(item?.id) || "0";
+  const username = String(item?.username || item?.name || id);
+  const globalName = item?.global_name ? String(item.global_name) : null;
+
+  let avatarUrl: string | null = null;
+  if (typeof item?.avatar_url === "string" && item.avatar_url.trim()) {
+    avatarUrl = item.avatar_url.trim();
+  } else if (item?.avatar) {
+    const avatarHash = String(item.avatar);
+    avatarUrl = `https://cdn.discordapp.com/avatars/${id}/${avatarHash}.png?size=256`;
   }
 
   return {
-    "X-Audit-Log-Reason": encodeURIComponent(cleaned).slice(0, 512)
+    id,
+    username,
+    globalName,
+    avatarUrl
   };
 }
 
-async function requestFluxerBotApi(path: string, init: RequestInit, fallbackMessage: string): Promise<unknown> {
-  const token = requireBotToken();
-  const response = await requestFluxerApi(path, `Bot ${token}`, init);
+async function fetchJson<T>(url: string, init: RequestInit): Promise<T> {
+  const response = await fetch(url, init);
   if (!response.ok) {
-    const reason = parseApiErrorText(response.body) ?? `${fallbackMessage} (${response.status})`;
-    throw new Error(reason);
+    const text = await response.text();
+    throw new Error(`Fluxer API ${response.status}: ${text || response.statusText}`);
   }
 
-  return response.body;
+  return (await response.json()) as T;
 }
 
-export function buildFluxerLoginUrl(state: string): string {
-  const env = getEnv();
-  const { clientId } = requireOauthClientConfig();
+export function createOAuthState(): string {
+  return crypto.randomBytes(18).toString("hex");
+}
 
+export function buildFluxerAuthorizeUrl(state: string): string {
   const params = new URLSearchParams({
+    client_id: env.fluxerClientId,
     response_type: "code",
-    client_id: clientId,
-    redirect_uri: oauthRedirectUri(),
-    scope: env.fluxerOauthScope,
+    redirect_uri: env.fluxerRedirectUri,
+    scope: "identify guilds",
     state
   });
 
-  return `${env.fluxerWebBase}/oauth2/authorize?${params.toString()}`;
+  return `${env.fluxerAuthorizeUrl}?${params.toString()}`;
 }
 
-export async function exchangeFluxerCode(code: string): Promise<FluxerTokenResponse> {
-  const env = getEnv();
-  const { clientId, clientSecret } = requireOauthClientConfig();
-
-  const payload = new URLSearchParams({
+export async function exchangeOAuthCodeForToken(code: string): Promise<{ accessToken: string; expiresIn: number }> {
+  const body = new URLSearchParams({
+    client_id: env.fluxerClientId,
+    client_secret: env.fluxerClientSecret,
     grant_type: "authorization_code",
-    client_id: clientId,
-    client_secret: clientSecret,
-    redirect_uri: oauthRedirectUri(),
+    redirect_uri: env.fluxerRedirectUri,
     code
   });
 
-  const response = await fetch(`${env.fluxerApiBase}/oauth2/token`, {
+  const response = await fetch(env.fluxerTokenUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"
     },
-    body: payload,
+    body
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Token exchange failed: ${response.status} ${text}`);
+  }
+
+  const payload = (await response.json()) as Record<string, unknown>;
+  return {
+    accessToken: String(payload.access_token || ""),
+    expiresIn: Number(payload.expires_in || 3600)
+  };
+}
+
+export async function fetchCurrentUser(accessToken: string): Promise<FluxerUser> {
+  const raw = await fetchJson<unknown>(`${env.fluxerApiBaseUrl}/users/@me`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`
+    },
     cache: "no-store"
   });
 
-  const text = await response.text();
-  let body: unknown = null;
-
-  if (text) {
-    try {
-      body = JSON.parse(text);
-    } catch {
-      body = null;
-    }
-  }
-
-  if (!response.ok) {
-    const reason = parseApiErrorText(body) ?? `OAuth token exchange failed (${response.status})`;
-    throw new Error(reason);
-  }
-
-  const token = body as FluxerTokenResponse | null;
-  if (!token || typeof token.access_token !== "string" || !token.access_token.trim()) {
-    throw new Error("Fluxer token response did not include access_token");
-  }
-
-  return token;
+  return normalizeUser(raw);
 }
 
-export async function fetchFluxerUser(accessToken: string): Promise<FluxerUser> {
-  const response = await requestFluxerApi("/users/@me", `Bearer ${accessToken}`);
-  if (!response.ok) {
-    const reason = parseApiErrorText(response.body) ?? `Failed to fetch Fluxer user (${response.status})`;
-    throw new Error(reason);
-  }
+export async function fetchUserGuilds(accessToken: string): Promise<FluxerGuild[]> {
+  const raw = await fetchJson<unknown>(`${env.fluxerApiBaseUrl}/users/@me/guilds`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`
+    },
+    cache: "no-store"
+  });
 
-  return (response.body ?? {}) as FluxerUser;
+  const list = Array.isArray(raw) ? raw : [];
+  return list.map(normalizeGuild).filter((item): item is FluxerGuild => Boolean(item));
 }
 
-async function fetchGuildsWithAuthorization(authorization: string): Promise<FluxerGuildOAuth[]> {
-  const response = await requestFluxerApi("/users/@me/guilds", authorization);
-  if (!response.ok) {
-    const reason = parseApiErrorText(response.body) ?? `Failed to fetch Fluxer guilds (${response.status})`;
-    throw new Error(reason);
-  }
-
-  if (!Array.isArray(response.body)) {
+export async function fetchBotGuilds(botToken: string): Promise<FluxerGuild[]> {
+  if (!botToken) {
     return [];
   }
 
-  return response.body as FluxerGuildOAuth[];
+  const raw = await fetchJson<unknown>(`${env.fluxerApiBaseUrl}/users/@me/guilds`, {
+    headers: {
+      Authorization: `Bot ${botToken}`
+    },
+    cache: "no-store"
+  });
+
+  const list = Array.isArray(raw) ? raw : [];
+  return list.map(normalizeGuild).filter((item): item is FluxerGuild => Boolean(item));
 }
 
-export async function fetchFluxerUserGuilds(accessToken: string): Promise<FluxerGuildOAuth[]> {
-  return fetchGuildsWithAuthorization(`Bearer ${accessToken}`);
+export function hasGuildManagePermission(guild: FluxerGuild): boolean {
+  const bitfield = toPermissionsBitfield(guild.permissions);
+  return (bitfield & PERMISSION_ADMINISTRATOR) === PERMISSION_ADMINISTRATOR || (bitfield & PERMISSION_MANAGE_GUILD) === PERMISSION_MANAGE_GUILD;
 }
 
-export async function fetchFluxerBotGuildIds(): Promise<Set<string>> {
-  const token = requireBotToken();
-
-  const guilds = await fetchGuildsWithAuthorization(`Bot ${token}`);
-  const ids = guilds
-    .map((guild) => parseSnowflake(guild.id))
-    .filter((id): id is string => id !== null);
-
-  return new Set(ids);
-}
-
-export async function fetchFluxerGuildRoles(guildId: string): Promise<GuildRole[]> {
-  const body = await requestFluxerBotApi(
-    `/guilds/${guildId}/roles`,
-    { method: "GET" },
-    "Failed to fetch guild roles"
-  );
-
-  if (!Array.isArray(body)) {
-    return [];
-  }
-
-  const roles = body
-    .map((entry) => {
-      const row = typeof entry === "object" && entry ? (entry as Record<string, unknown>) : {};
-      const id = parseSnowflake(row.id);
-      if (!id) {
-        return null;
-      }
-
+export function intersectGuilds(userGuilds: FluxerGuild[], botGuilds: FluxerGuild[]): FluxerGuild[] {
+  const botMap = new Map(botGuilds.map((guild) => [guild.id, guild]));
+  return userGuilds
+    .filter((guild) => hasGuildManagePermission(guild) && botMap.has(guild.id))
+    .map((guild) => {
+      const botGuild = botMap.get(guild.id)!;
       return {
-        id,
-        name: String(row.name ?? `Role ${id}`),
-        position: Number(row.position ?? 0)
-      } satisfies GuildRole;
+        ...guild,
+        name: guild.name || botGuild.name,
+        iconUrl: guild.iconUrl || botGuild.iconUrl
+      };
     })
-    .filter((value): value is GuildRole => value !== null)
-    .sort((a, b) => b.position - a.position || a.id.localeCompare(b.id));
-
-  return roles;
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export async function kickFluxerMember(guildId: string, userId: string, reason?: string): Promise<void> {
-  await requestFluxerBotApi(
-    `/guilds/${guildId}/members/${userId}`,
-    {
-      method: "DELETE",
-      headers: auditLogHeaders(reason)
-    },
-    "Failed to kick member"
-  );
-}
-
-export async function banFluxerMember(
-  guildId: string,
-  userId: string,
-  options?: {
-    reason?: string;
-    banDurationSeconds?: number;
-    deleteMessageDays?: number;
-    deleteMessageSeconds?: number;
-  }
-): Promise<void> {
-  const payload: Record<string, number> = {};
-
-  const banDurationSeconds = Number(options?.banDurationSeconds ?? 0);
-  if (Number.isInteger(banDurationSeconds) && banDurationSeconds > 0) {
-    payload.ban_duration_seconds = banDurationSeconds;
+export async function sendBotDirectMessage(userId: string, content: string): Promise<boolean> {
+  if (!env.botToken || !toSnowflake(userId) || !content.trim()) {
+    return false;
   }
 
-  const deleteMessageDays = Number(options?.deleteMessageDays ?? 0);
-  if (Number.isInteger(deleteMessageDays) && deleteMessageDays > 0) {
-    payload.delete_message_days = deleteMessageDays;
-  }
-
-  const deleteMessageSeconds = Number(options?.deleteMessageSeconds ?? 0);
-  if (Number.isInteger(deleteMessageSeconds) && deleteMessageSeconds > 0) {
-    payload.delete_message_seconds = deleteMessageSeconds;
-  }
-
-  await requestFluxerBotApi(
-    `/guilds/${guildId}/bans/${userId}`,
-    {
-      method: "PUT",
-      headers: auditLogHeaders(options?.reason),
-      body: Object.keys(payload).length ? JSON.stringify(payload) : undefined
-    },
-    "Failed to ban member"
-  );
-}
-
-export async function unbanFluxerMember(guildId: string, userId: string, reason?: string): Promise<void> {
-  await requestFluxerBotApi(
-    `/guilds/${guildId}/bans/${userId}`,
-    {
-      method: "DELETE",
-      headers: auditLogHeaders(reason)
-    },
-    "Failed to unban member"
-  );
-}
-
-export async function setFluxerMemberTimeout(
-  guildId: string,
-  userId: string,
-  untilIso: string | null,
-  reason?: string
-): Promise<void> {
-  await requestFluxerBotApi(
-    `/guilds/${guildId}/members/${userId}`,
-    {
-      method: "PATCH",
-      headers: auditLogHeaders(reason),
-      body: JSON.stringify({ communication_disabled_until: untilIso })
-    },
-    "Failed to update member timeout"
-  );
-}
-
-export async function clearFluxerMemberTimeout(guildId: string, userId: string, reason?: string): Promise<void> {
-  await setFluxerMemberTimeout(guildId, userId, null, reason);
-}
-
-export async function addFluxerMemberRole(
-  guildId: string,
-  userId: string,
-  roleId: string,
-  reason?: string
-): Promise<void> {
-  await requestFluxerBotApi(
-    `/guilds/${guildId}/members/${userId}/roles/${roleId}`,
-    {
-      method: "PUT",
-      headers: auditLogHeaders(reason)
-    },
-    "Failed to add member role"
-  );
-}
-
-export async function removeFluxerMemberRole(
-  guildId: string,
-  userId: string,
-  roleId: string,
-  reason?: string
-): Promise<void> {
-  await requestFluxerBotApi(
-    `/guilds/${guildId}/members/${userId}/roles/${roleId}`,
-    {
-      method: "DELETE",
-      headers: auditLogHeaders(reason)
-    },
-    "Failed to remove member role"
-  );
-}
-
-export async function fetchFluxerChannelMessages(channelId: string, limit = 50): Promise<string[]> {
-  const safeLimit = Math.max(1, Math.min(Math.trunc(limit), 100));
-  const params = new URLSearchParams({ limit: String(safeLimit) });
-
-  const body = await requestFluxerBotApi(
-    `/channels/${channelId}/messages?${params.toString()}`,
-    { method: "GET" },
-    "Failed to list channel messages"
-  );
-
-  if (!Array.isArray(body)) {
-    return [];
-  }
-
-  return body
-    .map((entry) => parseSnowflake((entry as FluxerMessageLike)?.id))
-    .filter((id): id is string => id !== null);
-}
-
-export async function deleteFluxerChannelMessage(channelId: string, messageId: string): Promise<void> {
-  await requestFluxerBotApi(
-    `/channels/${channelId}/messages/${messageId}`,
-    { method: "DELETE" },
-    "Failed to delete message"
-  );
-}
-
-export async function bulkDeleteFluxerChannelMessages(channelId: string, messageIds: string[]): Promise<void> {
-  const cleaned = messageIds
-    .map((id) => parseSnowflake(id))
-    .filter((id): id is string => id !== null);
-
-  if (cleaned.length === 0) {
-    return;
-  }
-
-  await requestFluxerBotApi(
-    `/channels/${channelId}/messages/bulk-delete`,
-    {
+  try {
+    const dmChannel = (await fetchJson<Record<string, unknown>>(`${env.fluxerApiBaseUrl}/users/@me/channels`, {
       method: "POST",
-      body: JSON.stringify({ message_ids: cleaned })
-    },
-    "Failed to bulk delete messages"
-  );
+      headers: {
+        Authorization: `Bot ${env.botToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ recipient_id: userId }),
+      cache: "no-store"
+    })) as Record<string, unknown>;
+
+    const channelId = toSnowflake(dmChannel.id);
+    if (!channelId) {
+      return false;
+    }
+
+    await fetchJson(`${env.fluxerApiBaseUrl}/channels/${channelId}/messages`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bot ${env.botToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ content }),
+      cache: "no-store"
+    });
+
+    return true;
+  } catch {
+    return false;
+  }
 }

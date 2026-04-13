@@ -1,72 +1,52 @@
 import crypto from "node:crypto";
+import { env } from "@/lib/env";
 
-import { getEnv } from "@/lib/env";
-import { sanitizeNextPath } from "@/lib/next-path";
+const DEFAULT_TTL_SECONDS = 600;
 
-type OauthStatePayload = {
-  nonce: string;
-  nextPath: string;
-  iat: number;
-};
-
-function sign(data: string): string {
-  return crypto.createHmac("sha256", getEnv().sessionSecret).update(data).digest("base64url");
+function signPayload(payload: string): string {
+  return crypto.createHmac("sha256", env.dashboardSessionSecret).update(payload).digest("hex");
 }
 
-export function createOauthState(nextPath: string): string {
-  const payload: OauthStatePayload = {
-    nonce: crypto.randomBytes(24).toString("hex"),
-    nextPath: sanitizeNextPath(nextPath),
-    iat: Date.now()
-  };
-
-  const data = Buffer.from(JSON.stringify(payload), "utf-8").toString("base64url");
-  const signature = sign(data);
-  return `${data}.${signature}`;
+export function createSignedOAuthState(ttlSeconds = DEFAULT_TTL_SECONDS): string {
+  const nonce = crypto.randomBytes(18).toString("hex");
+  const issuedAtSeconds = Math.floor(Date.now() / 1000);
+  const maxAge = Math.max(30, Math.trunc(ttlSeconds));
+  const payload = `${nonce}.${issuedAtSeconds}.${maxAge}`;
+  const signature = signPayload(payload);
+  return `${payload}.${signature}`;
 }
 
-export function parseOauthState(token: string, maxAgeSeconds = 600): OauthStatePayload | null {
-  const raw = String(token ?? "").trim();
-  if (!raw || !raw.includes(".")) {
-    return null;
+export function verifySignedOAuthState(state: string): boolean {
+  const normalized = String(state || "").trim();
+  const parts = normalized.split(".");
+  if (parts.length !== 4) {
+    return false;
   }
 
-  const [data, providedSig] = raw.split(".", 2);
-  if (!data || !providedSig) {
-    return null;
+  const [nonce, issuedAtRaw, maxAgeRaw, signature] = parts;
+  if (!/^[a-f0-9]{36}$/i.test(nonce) || !/^[a-f0-9]{64}$/i.test(signature)) {
+    return false;
   }
 
-  const expectedSig = sign(data);
-  const providedBuffer = Buffer.from(providedSig, "utf-8");
-  const expectedBuffer = Buffer.from(expectedSig, "utf-8");
-
-  if (providedBuffer.length !== expectedBuffer.length) {
-    return null;
+  const issuedAtSeconds = Number(issuedAtRaw);
+  const maxAge = Number(maxAgeRaw);
+  if (!Number.isFinite(issuedAtSeconds) || !Number.isFinite(maxAge)) {
+    return false;
   }
 
-  if (!crypto.timingSafeEqual(providedBuffer, expectedBuffer)) {
-    return null;
+  const boundedMaxAge = Math.max(30, Math.min(3600, Math.trunc(maxAge)));
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (nowSeconds - issuedAtSeconds > boundedMaxAge || issuedAtSeconds - nowSeconds > 30) {
+    return false;
   }
 
-  try {
-    const json = Buffer.from(data, "base64url").toString("utf-8");
-    const decoded = JSON.parse(json) as Partial<OauthStatePayload>;
-
-    const nonce = typeof decoded.nonce === "string" ? decoded.nonce.trim() : "";
-    const nextPath = sanitizeNextPath(decoded.nextPath ?? "/dashboard");
-    const iat = Number(decoded.iat ?? 0);
-
-    if (!nonce || !Number.isFinite(iat) || iat <= 0) {
-      return null;
-    }
-
-    const ageMs = Date.now() - iat;
-    if (ageMs < 0 || ageMs > maxAgeSeconds * 1000) {
-      return null;
-    }
-
-    return { nonce, nextPath, iat };
-  } catch {
-    return null;
+  const payload = `${nonce}.${issuedAtRaw}.${maxAgeRaw}`;
+  const expected = signPayload(payload);
+  const expectedBuffer = Buffer.from(expected, "utf8");
+  const providedBuffer = Buffer.from(signature, "utf8");
+  if (expectedBuffer.length !== providedBuffer.length) {
+    return false;
   }
+
+  return crypto.timingSafeEqual(expectedBuffer, providedBuffer);
 }
