@@ -3,17 +3,17 @@ import Link from "next/link";
 export default function LandingPage() {
   return (
     <main>
-      <section className="hero">
+      <section className="hero hero-upgrade">
         <div className="grid" style={{ gap: 18 }}>
-          <span className="pill">Fluxer Bot Dashboard</span>
-          <h1>Minimal control panel for moderation, security, and leveling.</h1>
+          <span className="pill">Fluxer Command Center</span>
+          <h1>Manage moderation, tickets, level cards, and welcome flow in one control surface.</h1>
           <p>
-            Connect your Fluxer account, pick a shared server, and control raid gate, warning visibility,
-            channel restrictions, utility actions, command enablement, and editable message templates in one place.
+            Build an experience that feels premium: tune command toggles, edit card templates, automate reaction-based
+            tickets, and monitor warnings from a single dashboard.
           </p>
           <div className="nav-actions">
             <a href="/api/auth/login" className="btn primary">
-              Login with Fluxer
+              Connect Fluxer
             </a>
             <Link href="/dashboard" className="btn">
               Open Dashboard
@@ -21,24 +21,46 @@ export default function LandingPage() {
           </div>
         </div>
 
-        <div className="kpi">
-          <article className="panel">
-            <h3>Secure Writes</h3>
-            <p className="muted">Every high-impact change is TOTP-gated with a 30-day authorization window.</p>
-          </article>
-          <article className="panel">
-            <h3>Command Policy</h3>
-            <p className="muted">Enable or disable commands per server, including purge and utility workflows.</p>
-          </article>
-          <article className="panel">
-            <h3>Template Control</h3>
-            <p className="muted">Edit welcome and level-up messages using placeholders like {"{user.mention}"}.</p>
-          </article>
-          <article className="panel">
-            <h3>Raid Visibility</h3>
-            <p className="muted">Inspect warnings and trigger raid gate actions from a single server panel.</p>
-          </article>
+        <div className="panel hero-preview-panel">
+          <div className="hero-preview-banner">
+            <div className="hero-preview-overlay">
+              <h3>Welcome to your server</h3>
+              <p>Customize title, subtitle, colors, and overlays in real time.</p>
+            </div>
+          </div>
+          <div className="hero-preview-metrics">
+            <span className="pill">Level Cards</span>
+            <span className="pill">Reaction Tickets</span>
+            <span className="pill">Raid Gate</span>
+          </div>
         </div>
+      </section>
+
+      <section className="feature-grid">
+        <article className="panel feature-card">
+          <h3>Command Matrix</h3>
+          <p className="muted">Enable or disable command families with clear slider controls and status chips.</p>
+        </article>
+        <article className="panel feature-card">
+          <h3>Level Card Studio</h3>
+          <p className="muted">Tune card colors, overlay intensity, and backgrounds to match your server identity.</p>
+        </article>
+        <article className="panel feature-card">
+          <h3>Welcome Visuals</h3>
+          <p className="muted">Create richer welcome moments with title and subtitle templates plus themed card output.</p>
+        </article>
+        <article className="panel feature-card">
+          <h3>Reaction Tickets</h3>
+          <p className="muted">Turn one reaction into a support ticket channel with role pings and starter context.</p>
+        </article>
+      </section>
+
+      <section className="panel showcase-strip">
+        <h3>Built for active communities</h3>
+        <p className="muted">
+          High-impact writes stay protected with TOTP, while your moderation and community workflows stay fast and
+          visual.
+        </p>
       </section>
     </main>
   );

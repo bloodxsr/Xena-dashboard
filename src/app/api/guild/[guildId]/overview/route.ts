@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   countTrackedLevelMembers,
+  listReactionRolePanels,
   getCommandStates,
   getGuildConfig,
   getRaidGateState,
@@ -8,7 +9,7 @@ import {
   listTopLevelMembers,
   listWarningCounts
 } from "@/lib/db";
-import { fetchGuildChannels } from "@/lib/fluxer";
+import { fetchGuildChannels, fetchGuildRoles } from "@/lib/fluxer";
 import { requireGuildContext } from "@/lib/request-auth";
 import { resolveTotpAuthorization } from "@/lib/totp";
 
@@ -24,7 +25,7 @@ export async function GET(
     return auth;
   }
 
-  const [config, raidGate, warnings, commandStates, topMembers, trackedMembers, totpRecord, channels] = await Promise.all([
+  const [config, raidGate, warnings, commandStates, topMembers, trackedMembers, totpRecord, channels, roles, reactionRolePanels] = await Promise.all([
     getGuildConfig(guildId),
     getRaidGateState(guildId),
     listWarningCounts(guildId, 50),
@@ -32,7 +33,9 @@ export async function GET(
     listTopLevelMembers(guildId, 3),
     countTrackedLevelMembers(guildId),
     getStaffTotpAuth(guildId, auth.session.userId),
-    fetchGuildChannels(guildId).catch(() => [])
+    fetchGuildChannels(guildId).catch(() => []),
+    fetchGuildRoles(guildId).catch(() => []),
+    listReactionRolePanels(guildId)
   ]);
   const totp = resolveTotpAuthorization(totpRecord);
 
@@ -45,6 +48,8 @@ export async function GET(
     topMembers,
     trackedMembers,
     channels,
+    roles,
+    reactionRolePanels,
     totp
   });
 }

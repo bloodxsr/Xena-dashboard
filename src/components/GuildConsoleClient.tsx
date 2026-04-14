@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 
 const CHANNEL_FIELD_DEFINITIONS = [
   { key: "log_channel_id", label: "Log Channel" },
@@ -14,6 +15,11 @@ const CHANNEL_FIELD_DEFINITIONS = [
 ] as const;
 
 const TEXT_LIKE_CHANNEL_TYPES = new Set([0, 5, 15]);
+
+type ReactionRoleDraftRow = {
+  emoji: string;
+  roleId: string;
+};
 
 type OverviewPayload = {
   guild: {
@@ -41,6 +47,26 @@ type OverviewPayload = {
     kick_message_template: string;
     ban_message_template: string;
     mute_message_template: string;
+    level_card_font: string;
+    level_card_primary_color: string;
+    level_card_accent_color: string;
+    level_card_background_url: string | null;
+    level_card_overlay_opacity: number;
+    welcome_card_enabled: boolean;
+    welcome_card_title_template: string;
+    welcome_card_subtitle_template: string;
+    welcome_card_font: string;
+    welcome_card_primary_color: string;
+    welcome_card_accent_color: string;
+    welcome_card_background_url: string | null;
+    welcome_card_overlay_opacity: number;
+    ticket_enabled: boolean;
+    ticket_trigger_channel_id: string | null;
+    ticket_trigger_message_id: string | null;
+    ticket_trigger_emoji: string;
+    ticket_category_channel_id: string | null;
+    ticket_support_role_id: string | null;
+    ticket_welcome_template: string;
     admin_role_name: string;
     mod_role_name: string;
   };
@@ -72,6 +98,32 @@ type OverviewPayload = {
     position: number;
     parentId: string | null;
   }>;
+  roles: Array<{
+    id: string;
+    guildId: string;
+    name: string;
+    color: number;
+    position: number;
+    managed: boolean;
+    mentionable: boolean;
+  }>;
+  reactionRolePanels: Array<{
+    guild_id: string;
+    channel_id: string;
+    message_id: string;
+    content: string;
+    created_at: string;
+    updated_at: string;
+    mappings: Array<{
+      guild_id: string;
+      channel_id: string;
+      message_id: string;
+      emoji_key: string;
+      emoji_display: string;
+      role_id: string;
+      created_at: string;
+    }>;
+  }>;
   trackedMembers: number;
   totp: {
     enrolled: boolean;
@@ -98,6 +150,15 @@ function formatTimestamp(value: string | null | undefined): string {
   return date.toLocaleString();
 }
 
+function draftBool(value: string | null | undefined): boolean {
+  const text = String(value || "").trim().toLowerCase();
+  return ["1", "true", "yes", "on"].includes(text);
+}
+
+function boolDraftValue(value: boolean): string {
+  return value ? "1" : "0";
+}
+
 export function GuildConsoleClient({ guildId }: { guildId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -107,6 +168,12 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
   const [raidDuration, setRaidDuration] = useState("900");
   const [raidReason, setRaidReason] = useState("Dashboard toggle");
   const [configDraft, setConfigDraft] = useState<Record<string, string>>({});
+  const [reactionPanelChannelId, setReactionPanelChannelId] = useState("");
+  const [reactionPanelContent, setReactionPanelContent] = useState("");
+  const [reactionPanelMappings, setReactionPanelMappings] = useState<ReactionRoleDraftRow[]>([{ emoji: "", roleId: "" }]);
+  const [creatingReactionPanel, setCreatingReactionPanel] = useState(false);
+  const [removingReactionPanelMessageId, setRemovingReactionPanelMessageId] = useState<string | null>(null);
+  const [editingReactionPanel, setEditingReactionPanel] = useState<{ messageId: string; channelId: string } | null>(null);
 
   const loadOverview = useCallback(async () => {
     setLoading(true);
@@ -141,6 +208,26 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
         kick_message_template: payload.config.kick_message_template,
         ban_message_template: payload.config.ban_message_template,
         mute_message_template: payload.config.mute_message_template,
+        level_card_font: payload.config.level_card_font,
+        level_card_primary_color: payload.config.level_card_primary_color,
+        level_card_accent_color: payload.config.level_card_accent_color,
+        level_card_background_url: toInputValue(payload.config.level_card_background_url),
+        level_card_overlay_opacity: numberInput(payload.config.level_card_overlay_opacity),
+        welcome_card_enabled: boolDraftValue(payload.config.welcome_card_enabled),
+        welcome_card_title_template: payload.config.welcome_card_title_template,
+        welcome_card_subtitle_template: payload.config.welcome_card_subtitle_template,
+        welcome_card_font: payload.config.welcome_card_font,
+        welcome_card_primary_color: payload.config.welcome_card_primary_color,
+        welcome_card_accent_color: payload.config.welcome_card_accent_color,
+        welcome_card_background_url: toInputValue(payload.config.welcome_card_background_url),
+        welcome_card_overlay_opacity: numberInput(payload.config.welcome_card_overlay_opacity),
+        ticket_enabled: boolDraftValue(payload.config.ticket_enabled),
+        ticket_trigger_channel_id: toInputValue(payload.config.ticket_trigger_channel_id),
+        ticket_trigger_message_id: toInputValue(payload.config.ticket_trigger_message_id),
+        ticket_trigger_emoji: payload.config.ticket_trigger_emoji,
+        ticket_category_channel_id: toInputValue(payload.config.ticket_category_channel_id),
+        ticket_support_role_id: toInputValue(payload.config.ticket_support_role_id),
+        ticket_welcome_template: payload.config.ticket_welcome_template,
         admin_role_name: payload.config.admin_role_name,
         mod_role_name: payload.config.mod_role_name
       });
@@ -162,6 +249,12 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
     const filtered = channels.filter((channel) => TEXT_LIKE_CHANNEL_TYPES.has(channel.type));
     return filtered.length > 0 ? filtered : channels;
   }, [overview?.channels]);
+  const assignableRoles = useMemo(() => {
+    const roles = overview?.roles || [];
+    return roles
+      .filter((role) => role.id !== guildId)
+      .sort((a, b) => b.position - a.position || a.name.localeCompare(b.name));
+  }, [overview?.roles, guildId]);
   const warningSummary = useMemo(() => {
     const warnings = overview?.warnings || [];
     const total = warnings.reduce((sum, item) => sum + Math.max(0, Number(item.warning_count || 0)), 0);
@@ -172,6 +265,44 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
       highestCount: highest
     };
   }, [overview?.warnings]);
+  const levelCardPreviewStyle = useMemo(() => {
+    const background = (configDraft.level_card_background_url || "").trim();
+    const opacity = Math.max(0, Math.min(Number(configDraft.level_card_overlay_opacity || "0.38"), 1));
+    return {
+      "--card-primary": configDraft.level_card_primary_color || "#66f2c4",
+      "--card-accent": configDraft.level_card_accent_color || "#6da8ff",
+      "--card-overlay": String(opacity),
+      backgroundImage: background ? `url(${background})` : undefined
+    } as CSSProperties;
+  }, [
+    configDraft.level_card_primary_color,
+    configDraft.level_card_accent_color,
+    configDraft.level_card_overlay_opacity,
+    configDraft.level_card_background_url
+  ]);
+  const welcomeCardPreviewStyle = useMemo(() => {
+    const background = (configDraft.welcome_card_background_url || "").trim();
+    const opacity = Math.max(0, Math.min(Number(configDraft.welcome_card_overlay_opacity || "0.48"), 1));
+    return {
+      "--card-primary": configDraft.welcome_card_primary_color || "#f8fafc",
+      "--card-accent": configDraft.welcome_card_accent_color || "#6dd6ff",
+      "--card-overlay": String(opacity),
+      backgroundImage: background ? `url(${background})` : undefined
+    } as CSSProperties;
+  }, [
+    configDraft.welcome_card_primary_color,
+    configDraft.welcome_card_accent_color,
+    configDraft.welcome_card_overlay_opacity,
+    configDraft.welcome_card_background_url
+  ]);
+
+  useEffect(() => {
+    if (reactionPanelChannelId || assignableChannels.length === 0) {
+      return;
+    }
+
+    setReactionPanelChannelId(assignableChannels[0].id);
+  }, [assignableChannels, reactionPanelChannelId]);
 
   async function saveConfig(): Promise<void> {
     setNotice(null);
@@ -184,6 +315,10 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
         raid_monitor_window_seconds: Number(configDraft.raid_monitor_window_seconds || "90"),
         raid_join_rate_threshold: Number(configDraft.raid_join_rate_threshold || "8"),
         gate_duration_seconds: Number(configDraft.gate_duration_seconds || "900"),
+        level_card_overlay_opacity: Number(configDraft.level_card_overlay_opacity || "0.38"),
+        welcome_card_overlay_opacity: Number(configDraft.welcome_card_overlay_opacity || "0.48"),
+        welcome_card_enabled: draftBool(configDraft.welcome_card_enabled),
+        ticket_enabled: draftBool(configDraft.ticket_enabled),
         join_gate_mode: configDraft.join_gate_mode === "kick" ? "kick" : "timeout"
       }
     };
@@ -295,6 +430,140 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
 
     setNotice(`Raid gate ${enabled ? "enabled" : "disabled"}.`);
     await loadOverview();
+  }
+
+  function updateReactionMappingRow(index: number, patch: Partial<ReactionRoleDraftRow>): void {
+    setReactionPanelMappings((prev) =>
+      prev.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row))
+    );
+  }
+
+  function addReactionMappingRow(): void {
+    setReactionPanelMappings((prev) => [...prev, { emoji: "", roleId: "" }]);
+  }
+
+  function removeReactionMappingRow(index: number): void {
+    setReactionPanelMappings((prev) => {
+      const next = prev.filter((_row, rowIndex) => rowIndex !== index);
+      return next.length > 0 ? next : [{ emoji: "", roleId: "" }];
+    });
+  }
+
+  function beginReactionPanelEdit(panel: OverviewPayload["reactionRolePanels"][number]): void {
+    setEditingReactionPanel({
+      messageId: panel.message_id,
+      channelId: panel.channel_id
+    });
+    setReactionPanelChannelId(panel.channel_id);
+    setReactionPanelContent(panel.content || "");
+    setReactionPanelMappings(
+      panel.mappings.length > 0
+        ? panel.mappings.map((mapping) => ({
+            emoji: mapping.emoji_display,
+            roleId: mapping.role_id
+          }))
+        : [{ emoji: "", roleId: "" }]
+    );
+    setError(null);
+    setNotice(`Editing panel ${panel.message_id}.`);
+  }
+
+  function cancelReactionPanelEdit(): void {
+    setEditingReactionPanel(null);
+    setReactionPanelContent("");
+    setReactionPanelMappings([{ emoji: "", roleId: "" }]);
+    setError(null);
+    setNotice("Panel edit cancelled.");
+  }
+
+  async function createReactionPanel(): Promise<void> {
+    setError(null);
+    setNotice(null);
+
+    const channelId = (editingReactionPanel?.channelId || reactionPanelChannelId).trim();
+    if (!channelId) {
+      setError("Select a channel for the reaction role panel.");
+      return;
+    }
+
+    const content = reactionPanelContent.trim();
+    if (!content) {
+      setError("Panel content is required.");
+      return;
+    }
+
+    const mappings = reactionPanelMappings
+      .map((row) => ({ emoji: row.emoji.trim(), roleId: row.roleId.trim() }))
+      .filter((row) => row.emoji && row.roleId);
+
+    if (mappings.length === 0) {
+      setError("Add at least one emoji and role mapping.");
+      return;
+    }
+
+    setCreatingReactionPanel(true);
+    try {
+      const isUpdate = Boolean(editingReactionPanel);
+      const response = await fetch(`/api/guild/${guildId}/reaction-roles`, {
+        method: isUpdate ? "PUT" : "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          channelId,
+          messageId: editingReactionPanel?.messageId,
+          content,
+          mappings
+        })
+      });
+
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        setError(data.error || (isUpdate ? "Failed to update reaction role panel." : "Failed to create reaction role panel."));
+        return;
+      }
+
+      setNotice(isUpdate ? "Reaction role panel updated." : "Reaction role panel created.");
+      setEditingReactionPanel(null);
+      setReactionPanelContent("");
+      setReactionPanelMappings([{ emoji: "", roleId: "" }]);
+      await loadOverview();
+    } finally {
+      setCreatingReactionPanel(false);
+    }
+  }
+
+  async function removeReactionPanel(messageId: string, channelId: string): Promise<void> {
+    setError(null);
+    setNotice(null);
+    setRemovingReactionPanelMessageId(messageId);
+
+    try {
+      const response = await fetch(`/api/guild/${guildId}/reaction-roles`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ messageId, channelId })
+      });
+
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        setError(data.error || "Failed to remove reaction role panel.");
+        return;
+      }
+
+      if (editingReactionPanel?.messageId === messageId) {
+        setEditingReactionPanel(null);
+        setReactionPanelContent("");
+        setReactionPanelMappings([{ emoji: "", roleId: "" }]);
+      }
+
+      setNotice("Reaction role panel removed.");
+      await loadOverview();
+    } finally {
+      setRemovingReactionPanelMessageId(null);
+    }
   }
 
   if (loading) {
@@ -509,6 +778,459 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
               onChange={(event) => setConfigDraft((prev) => ({ ...prev, mute_message_template: event.target.value }))}
             />
           </label>
+        </div>
+      </section>
+
+      <section className="panel grid" style={{ gap: 12 }}>
+        <h3>Level Card Studio</h3>
+        <p className="muted">Style how rank cards look when members use rank commands.</p>
+
+        <div className="field-grid">
+          <label>
+            level_card_font
+            <select
+              value={configDraft.level_card_font || "default"}
+              onChange={(event) => setConfigDraft((prev) => ({ ...prev, level_card_font: event.target.value }))}
+            >
+              <option value="default">default</option>
+              <option value="clean">clean</option>
+              <option value="cyber">cyber</option>
+            </select>
+          </label>
+          <label>
+            level_card_primary_color
+            <input
+              type="color"
+              value={configDraft.level_card_primary_color || "#66f2c4"}
+              onChange={(event) =>
+                setConfigDraft((prev) => ({ ...prev, level_card_primary_color: event.target.value }))
+              }
+            />
+          </label>
+          <label>
+            level_card_accent_color
+            <input
+              type="color"
+              value={configDraft.level_card_accent_color || "#6da8ff"}
+              onChange={(event) =>
+                setConfigDraft((prev) => ({ ...prev, level_card_accent_color: event.target.value }))
+              }
+            />
+          </label>
+          <label>
+            level_card_overlay_opacity
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={configDraft.level_card_overlay_opacity || "0.38"}
+              onChange={(event) =>
+                setConfigDraft((prev) => ({ ...prev, level_card_overlay_opacity: event.target.value }))
+              }
+            />
+          </label>
+          <label>
+            level_card_background_url
+            <input
+              value={configDraft.level_card_background_url || ""}
+              onChange={(event) =>
+                setConfigDraft((prev) => ({ ...prev, level_card_background_url: event.target.value }))
+              }
+              placeholder="https://... optional"
+            />
+          </label>
+        </div>
+
+        <article className="card-preview level-preview" style={levelCardPreviewStyle}>
+          <div className="card-preview-overlay">
+            <p className="muted">Rank #44</p>
+            <h4>Enderman #0123</h4>
+            <p>Level 12 • 429/1337 XP</p>
+          </div>
+        </article>
+      </section>
+
+      <section className="panel grid" style={{ gap: 12 }}>
+        <h3>Welcome Card Studio</h3>
+        <p className="muted">Control welcome visuals and copy sent for new members.</p>
+
+        <div className="toggle-row">
+          <div className="toggle-meta">
+            <strong>welcome_card_enabled</strong>
+            <span className="muted">Send a welcome card image when members join.</span>
+          </div>
+          <div className="toggle-control">
+            <label className="switch" aria-label="toggle welcome card">
+              <input
+                type="checkbox"
+                checked={draftBool(configDraft.welcome_card_enabled)}
+                onChange={(event) =>
+                  setConfigDraft((prev) => ({
+                    ...prev,
+                    welcome_card_enabled: boolDraftValue(event.target.checked)
+                  }))
+                }
+              />
+              <span className="switch-track">
+                <span className="switch-thumb" />
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div className="field-grid">
+          <label>
+            welcome_card_title_template
+            <input
+              value={configDraft.welcome_card_title_template || ""}
+              onChange={(event) =>
+                setConfigDraft((prev) => ({ ...prev, welcome_card_title_template: event.target.value }))
+              }
+            />
+          </label>
+          <label>
+            welcome_card_subtitle_template
+            <input
+              value={configDraft.welcome_card_subtitle_template || ""}
+              onChange={(event) =>
+                setConfigDraft((prev) => ({ ...prev, welcome_card_subtitle_template: event.target.value }))
+              }
+            />
+          </label>
+          <label>
+            welcome_card_font
+            <select
+              value={configDraft.welcome_card_font || "default"}
+              onChange={(event) => setConfigDraft((prev) => ({ ...prev, welcome_card_font: event.target.value }))}
+            >
+              <option value="default">default</option>
+              <option value="clean">clean</option>
+              <option value="cinematic">cinematic</option>
+            </select>
+          </label>
+          <label>
+            welcome_card_primary_color
+            <input
+              type="color"
+              value={configDraft.welcome_card_primary_color || "#f8fafc"}
+              onChange={(event) =>
+                setConfigDraft((prev) => ({ ...prev, welcome_card_primary_color: event.target.value }))
+              }
+            />
+          </label>
+          <label>
+            welcome_card_accent_color
+            <input
+              type="color"
+              value={configDraft.welcome_card_accent_color || "#6dd6ff"}
+              onChange={(event) =>
+                setConfigDraft((prev) => ({ ...prev, welcome_card_accent_color: event.target.value }))
+              }
+            />
+          </label>
+          <label>
+            welcome_card_overlay_opacity
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={configDraft.welcome_card_overlay_opacity || "0.48"}
+              onChange={(event) =>
+                setConfigDraft((prev) => ({ ...prev, welcome_card_overlay_opacity: event.target.value }))
+              }
+            />
+          </label>
+          <label>
+            welcome_card_background_url
+            <input
+              value={configDraft.welcome_card_background_url || ""}
+              onChange={(event) =>
+                setConfigDraft((prev) => ({ ...prev, welcome_card_background_url: event.target.value }))
+              }
+              placeholder="https://... optional"
+            />
+          </label>
+        </div>
+
+        <article className="card-preview welcome-preview" style={welcomeCardPreviewStyle}>
+          <div className="card-preview-overlay">
+            <h4>{configDraft.welcome_card_title_template || "Welcome to your server"}</h4>
+            <p>
+              {configDraft.welcome_card_subtitle_template ||
+                "You're member #{server.member_count}. Make sure to read #rules."}
+            </p>
+          </div>
+        </article>
+      </section>
+
+      <section className="panel grid" style={{ gap: 12 }}>
+        <h3>Ticket System (Reaction Trigger)</h3>
+        <p className="muted">Create support tickets when members react to one configured message.</p>
+
+        <div className="toggle-row">
+          <div className="toggle-meta">
+            <strong>ticket_enabled</strong>
+            <span className="muted">Enable automatic ticket channel creation from a reaction trigger.</span>
+          </div>
+          <div className="toggle-control">
+            <label className="switch" aria-label="toggle ticket system">
+              <input
+                type="checkbox"
+                checked={draftBool(configDraft.ticket_enabled)}
+                onChange={(event) =>
+                  setConfigDraft((prev) => ({ ...prev, ticket_enabled: boolDraftValue(event.target.checked) }))
+                }
+              />
+              <span className="switch-track">
+                <span className="switch-thumb" />
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div className="field-grid">
+          <label>
+            ticket_trigger_channel_id
+            <select
+              value={configDraft.ticket_trigger_channel_id || ""}
+              onChange={(event) =>
+                setConfigDraft((prev) => ({ ...prev, ticket_trigger_channel_id: event.target.value }))
+              }
+            >
+              <option value="">none</option>
+              {assignableChannels.map((channel) => (
+                <option key={`ticket-trigger-${channel.id}`} value={channel.id}>
+                  #{channel.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            ticket_trigger_message_id
+            <input
+              value={configDraft.ticket_trigger_message_id || ""}
+              onChange={(event) =>
+                setConfigDraft((prev) => ({ ...prev, ticket_trigger_message_id: event.target.value.trim() }))
+              }
+              placeholder="message id"
+            />
+          </label>
+          <label>
+            ticket_trigger_emoji
+            <input
+              value={configDraft.ticket_trigger_emoji || "🎫"}
+              onChange={(event) =>
+                setConfigDraft((prev) => ({ ...prev, ticket_trigger_emoji: event.target.value }))
+              }
+              placeholder="🎫"
+            />
+          </label>
+          <label>
+            ticket_category_channel_id
+            <select
+              value={configDraft.ticket_category_channel_id || ""}
+              onChange={(event) =>
+                setConfigDraft((prev) => ({ ...prev, ticket_category_channel_id: event.target.value }))
+              }
+            >
+              <option value="">none</option>
+              {overview.channels.map((channel) => (
+                <option key={`ticket-category-${channel.id}`} value={channel.id}>
+                  {channel.type === 4 ? channel.name : `#${channel.name}`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            ticket_support_role_id
+            <input
+              value={configDraft.ticket_support_role_id || ""}
+              onChange={(event) =>
+                setConfigDraft((prev) => ({ ...prev, ticket_support_role_id: event.target.value.trim() }))
+              }
+              placeholder="role id"
+            />
+          </label>
+        </div>
+
+        <label>
+          ticket_welcome_template
+          <textarea
+            value={configDraft.ticket_welcome_template || ""}
+            onChange={(event) =>
+              setConfigDraft((prev) => ({ ...prev, ticket_welcome_template: event.target.value }))
+            }
+          />
+        </label>
+      </section>
+
+      <section className="panel grid" style={{ gap: 12 }}>
+        <h3>Reaction Role Panel</h3>
+        <p className="muted">
+          Send one embed message with multiple emoji-to-role mappings, similar to MEE6 style reaction roles.
+        </p>
+        {editingReactionPanel ? (
+          <p className="muted">
+            Editing message {editingReactionPanel.messageId}. Save changes to update the existing panel.
+          </p>
+        ) : null}
+
+        <div className="field-grid">
+          <label>
+            target_channel
+            <select
+              value={reactionPanelChannelId}
+              onChange={(event) => setReactionPanelChannelId(event.target.value)}
+              disabled={Boolean(editingReactionPanel)}
+            >
+              <option value="">select channel</option>
+              {assignableChannels.map((channel) => (
+                <option key={`reaction-panel-channel-${channel.id}`} value={channel.id}>
+                  #{channel.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={{ gridColumn: "1 / -1" }}>
+            panel_content
+            <textarea
+              value={reactionPanelContent}
+              onChange={(event) => setReactionPanelContent(event.target.value)}
+              placeholder="Pick your roles by reacting below."
+              maxLength={4096}
+            />
+          </label>
+        </div>
+
+        <div className="panel-subsection">
+          <h4>Mappings</h4>
+          <div className="grid" style={{ gap: 10 }}>
+            {reactionPanelMappings.map((row, index) => (
+              <div className="field-grid" key={`reaction-mapping-${index}`}>
+                <label>
+                  emoji
+                  <input
+                    value={row.emoji}
+                    onChange={(event) => updateReactionMappingRow(index, { emoji: event.target.value })}
+                    placeholder="🎮 or <:name:id>"
+                  />
+                </label>
+                <label>
+                  role
+                  <select
+                    value={row.roleId}
+                    onChange={(event) => updateReactionMappingRow(index, { roleId: event.target.value })}
+                  >
+                    <option value="">select role</option>
+                    {assignableRoles.map((role) => (
+                      <option key={`reaction-role-option-${role.id}`} value={role.id}>
+                        {role.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="nav-actions" style={{ alignItems: "end" }}>
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() => removeReactionMappingRow(index)}
+                    disabled={reactionPanelMappings.length <= 1}
+                  >
+                    Remove Row
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="nav-actions" style={{ marginTop: 10 }}>
+            <button className="btn" type="button" onClick={() => addReactionMappingRow()}>
+              Add Mapping Row
+            </button>
+            <button
+              className="btn primary"
+              type="button"
+              onClick={() => void createReactionPanel()}
+              disabled={creatingReactionPanel}
+            >
+              {creatingReactionPanel
+                ? editingReactionPanel
+                  ? "Saving..."
+                  : "Creating..."
+                : editingReactionPanel
+                  ? "Save Panel Changes"
+                  : "Send Reaction Panel"}
+            </button>
+            {editingReactionPanel ? (
+              <button className="btn" type="button" onClick={() => cancelReactionPanelEdit()}>
+                Cancel Edit
+              </button>
+            ) : null}
+          </div>
+          {assignableRoles.length === 0 ? (
+            <p className="muted">No roles found. Ensure bot can fetch guild roles before creating a panel.</p>
+          ) : null}
+        </div>
+
+        <div className="panel-subsection">
+          <h4>Active Panels</h4>
+          {overview.reactionRolePanels.length === 0 ? (
+            <p className="muted">No reaction role panels created yet.</p>
+          ) : (
+            <div className="grid" style={{ gap: 10 }}>
+              {overview.reactionRolePanels.map((panel) => {
+                const channelName =
+                  overview.channels.find((channel) => channel.id === panel.channel_id)?.name || panel.channel_id;
+
+                return (
+                  <article className="panel" key={`reaction-panel-${panel.message_id}`}>
+                    <h4>Message {panel.message_id}</h4>
+                    <p className="muted">Channel: #{channelName}</p>
+                    <p>{panel.content}</p>
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th>Emoji</th>
+                          <th>Role</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {panel.mappings.map((mapping) => {
+                          const roleName =
+                            overview.roles.find((role) => role.id === mapping.role_id)?.name || mapping.role_id;
+                          return (
+                            <tr key={`${panel.message_id}-${mapping.emoji_key}-${mapping.role_id}`}>
+                              <td>{mapping.emoji_display}</td>
+                              <td>{roleName}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    <div className="nav-actions">
+                      <button
+                        className="btn"
+                        type="button"
+                        onClick={() => beginReactionPanelEdit(panel)}
+                        disabled={creatingReactionPanel || removingReactionPanelMessageId === panel.message_id}
+                      >
+                        Edit Panel
+                      </button>
+                      <button
+                        className="btn"
+                        type="button"
+                        disabled={removingReactionPanelMessageId === panel.message_id}
+                        onClick={() => void removeReactionPanel(panel.message_id, panel.channel_id)}
+                      >
+                        {removingReactionPanelMessageId === panel.message_id ? "Removing..." : "Remove Panel"}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
         </div>
       </section>
 

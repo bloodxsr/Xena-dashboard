@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { env } from "@/lib/env";
+import { TopNavClient } from "@/components/TopNavClient";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -35,19 +35,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         {canonicalScript ? <script dangerouslySetInnerHTML={{ __html: canonicalScript }} /> : null}
-        <header className="top-nav">
-          <Link href="/" className="brand">
-            {env.dashboardBrandName}
-          </Link>
-          <nav className="nav-actions">
-            <Link href="/dashboard" className="btn">
-              Dashboard
-            </Link>
-            <a href="/api/auth/login" className="btn primary">
-              Connect Fluxer
-            </a>
-          </nav>
-        </header>
+        <TopNavClient brandName={env.dashboardBrandName} />
         {children}
       </body>
     </html>

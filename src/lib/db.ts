@@ -4,6 +4,7 @@ import * as postgresDb from "@/lib/db-postgres";
 import type {
   CommandToggleRecord,
   GuildConfigRecord,
+  ReactionRolePanelRecord,
   RaidGateRecord,
   TotpRecord,
   WarningRecord
@@ -122,4 +123,35 @@ export async function markStaffTotpVerified(
   return usePostgres
     ? postgresDb.markStaffTotpVerified(guildId, userId, verifiedAt)
     : Promise.resolve(sqliteDb.markStaffTotpVerified(guildId, userId, verifiedAt));
+}
+
+export async function listReactionRolePanels(guildId: string): Promise<ReactionRolePanelRecord[]> {
+  return usePostgres
+    ? postgresDb.listReactionRolePanels(guildId)
+    : Promise.resolve(sqliteDb.listReactionRolePanels(guildId));
+}
+
+export async function createReactionRolePanel(
+  guildId: string,
+  input: {
+    channelId: string;
+    messageId: string;
+    content: string;
+    mappings: Array<{
+      emojiKey: string;
+      emojiDisplay: string;
+      roleId: string;
+    }>;
+    createdByUserId?: string | null;
+  }
+): Promise<ReactionRolePanelRecord> {
+  return usePostgres
+    ? postgresDb.createReactionRolePanel(guildId, input)
+    : Promise.resolve(sqliteDb.createReactionRolePanel(guildId, input));
+}
+
+export async function deleteReactionRolePanel(guildId: string, messageId: string): Promise<boolean> {
+  return usePostgres
+    ? postgresDb.deleteReactionRolePanel(guildId, messageId)
+    : Promise.resolve(sqliteDb.deleteReactionRolePanel(guildId, messageId));
 }

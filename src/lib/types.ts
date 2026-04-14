@@ -21,6 +21,16 @@ export interface FluxerGuildChannel {
   parentId: string | null;
 }
 
+export interface FluxerGuildRole {
+  id: string;
+  guildId: string;
+  name: string;
+  color: number;
+  position: number;
+  managed: boolean;
+  mentionable: boolean;
+}
+
 export interface DashboardSession {
   userId: string;
   username: string;
@@ -44,6 +54,26 @@ export interface GuildConfigRecord {
   kick_message_template: string;
   ban_message_template: string;
   mute_message_template: string;
+  level_card_font: string;
+  level_card_primary_color: string;
+  level_card_accent_color: string;
+  level_card_background_url: string | null;
+  level_card_overlay_opacity: number;
+  welcome_card_enabled: boolean;
+  welcome_card_title_template: string;
+  welcome_card_subtitle_template: string;
+  welcome_card_font: string;
+  welcome_card_primary_color: string;
+  welcome_card_accent_color: string;
+  welcome_card_background_url: string | null;
+  welcome_card_overlay_opacity: number;
+  ticket_enabled: boolean;
+  ticket_trigger_channel_id: string | null;
+  ticket_trigger_message_id: string | null;
+  ticket_trigger_emoji: string;
+  ticket_category_channel_id: string | null;
+  ticket_support_role_id: string | null;
+  ticket_welcome_template: string;
   admin_role_name: string;
   mod_role_name: string;
   verification_url: string | null;
@@ -81,4 +111,24 @@ export interface TotpRecord {
   created_at: string;
   updated_at: string;
   last_verified_at: string | null;
+}
+
+export interface ReactionRoleMappingRecord {
+  guild_id: string;
+  channel_id: string;
+  message_id: string;
+  emoji_key: string;
+  emoji_display: string;
+  role_id: string;
+  created_at: string;
+}
+
+export interface ReactionRolePanelRecord {
+  guild_id: string;
+  channel_id: string;
+  message_id: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+  mappings: ReactionRoleMappingRecord[];
 }

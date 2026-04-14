@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { env } from "@/lib/env";
-import type { FluxerGuild, FluxerGuildChannel, FluxerUser } from "@/lib/types";
+import type { FluxerGuild, FluxerGuildChannel, FluxerGuildRole, FluxerUser } from "@/lib/types";
 
 const PERMISSION_ADMINISTRATOR = 0x8n;
 const PERMISSION_MANAGE_GUILD = 0x20n;
@@ -85,6 +85,30 @@ function normalizeGuildChannel(raw: unknown, guildId: string): FluxerGuildChanne
     type: Number.isFinite(typeNumber) ? Math.trunc(typeNumber) : 0,
     position: Number.isFinite(positionNumber) ? Math.trunc(positionNumber) : 0,
     parentId: toSnowflake(item?.parent_id)
+  };
+}
+
+function normalizeGuildRole(raw: unknown, guildId: string): FluxerGuildRole | null {
+  const item = raw as Record<string, unknown>;
+  const id = toSnowflake(item?.id);
+  const normalizedGuildId = toSnowflake(item?.guild_id) || guildId;
+  const name = String(item?.name || "").trim();
+
+  if (!id || !normalizedGuildId || !name) {
+    return null;
+  }
+
+  const colorNumber = Number(item?.color);
+  const positionNumber = Number(item?.position);
+
+  return {
+    id,
+    guildId: normalizedGuildId,
+    name,
+    color: Number.isFinite(colorNumber) ? Math.max(0, Math.trunc(colorNumber)) : 0,
+    position: Number.isFinite(positionNumber) ? Math.trunc(positionNumber) : 0,
+    managed: Boolean(item?.managed),
+    mentionable: Boolean(item?.mentionable)
   };
 }
 
@@ -207,6 +231,37 @@ export async function fetchGuildChannels(guildId: string, botToken = env.botToke
     .sort((a, b) => {
       if (a.position !== b.position) {
         return a.position - b.position;
+      }
+
+      return a.name.localeCompare(b.name);
+    });
+}
+
+export async function fetchGuildRoles(guildId: string, botToken = env.botToken): Promise<FluxerGuildRole[]> {
+  const normalizedGuildId = toSnowflake(guildId);
+  if (!botToken || !normalizedGuildId) {
+    return [];
+  }
+
+  const raw = await fetchJson<unknown>(`${env.fluxerApiBaseUrl}/guilds/${normalizedGuildId}/roles`, {
+    headers: {
+      Authorization: `Bot ${botToken}`
+    },
+    cache: "no-store"
+  });
+
+  const list = Array.isArray(raw)
+    ? raw
+    : typeof raw === "object" && raw !== null && Array.isArray((raw as Record<string, unknown>).roles)
+      ? ((raw as Record<string, unknown>).roles as unknown[])
+      : [];
+
+  return list
+    .map((entry) => normalizeGuildRole(entry, normalizedGuildId))
+    .filter((role): role is FluxerGuildRole => Boolean(role))
+    .sort((a, b) => {
+      if (a.position !== b.position) {
+        return b.position - a.position;
       }
 
       return a.name.localeCompare(b.name);

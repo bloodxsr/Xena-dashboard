@@ -4,6 +4,8 @@ import { env } from "@/lib/env";
 import type {
   CommandToggleRecord,
   GuildConfigRecord,
+  ReactionRoleMappingRecord,
+  ReactionRolePanelRecord,
   RaidGateRecord,
   TotpRecord,
   WarningRecord
@@ -14,6 +16,25 @@ const DEFAULT_LEVELUP_MESSAGE_TEMPLATE = "Level Up: {user.mention} reached level
 const DEFAULT_KICK_MESSAGE_TEMPLATE = "You were kicked from {guild.name}. Reason: {reason}.";
 const DEFAULT_BAN_MESSAGE_TEMPLATE = "You were banned from {guild.name}. Reason: {reason}.";
 const DEFAULT_MUTE_MESSAGE_TEMPLATE = "You were muted in {guild.name}. Reason: {reason}.";
+const DEFAULT_LEVEL_CARD_FONT = "default";
+const DEFAULT_LEVEL_CARD_PRIMARY_COLOR = "#66f2c4";
+const DEFAULT_LEVEL_CARD_ACCENT_COLOR = "#6da8ff";
+const DEFAULT_LEVEL_CARD_OVERLAY_OPACITY = 0.38;
+const DEFAULT_WELCOME_CARD_TITLE_TEMPLATE = "Welcome to {guild.name}";
+const DEFAULT_WELCOME_CARD_SUBTITLE_TEMPLATE = "You're member #{server.member_count}. Read {channels.rules}.";
+const DEFAULT_WELCOME_CARD_FONT = "default";
+const DEFAULT_WELCOME_CARD_PRIMARY_COLOR = "#f8fafc";
+const DEFAULT_WELCOME_CARD_ACCENT_COLOR = "#6dd6ff";
+const DEFAULT_WELCOME_CARD_OVERLAY_OPACITY = 0.48;
+const DEFAULT_TICKET_TRIGGER_EMOJI = "🎫";
+const DEFAULT_TICKET_WELCOME_TEMPLATE =
+  "Hello {user.mention}, thanks for opening a ticket. Our team will be with you soon.";
+const DEPRECATED_TOGGLEABLE_COMMANDS = new Set([
+  "reactionroleadd",
+  "reactionroleclear",
+  "reactionrolelist",
+  "reactionroleremove"
+]);
 
 export const KNOWN_TOGGLEABLE_COMMANDS: string[] = [
   "addbadword",
@@ -37,10 +58,6 @@ export const KNOWN_TOGGLEABLE_COMMANDS: string[] = [
   "raidgate",
   "raidsnapshot",
   "rank",
-  "reactionroleadd",
-  "reactionroleclear",
-  "reactionrolelist",
-  "reactionroleremove",
   "rejectjoin",
   "reloadwords",
   "removerole",
@@ -115,6 +132,15 @@ function normalizeCommandName(value: unknown): string {
 function normalizeTemplateText(value: unknown, fallback: string): string {
   const text = String(value ?? "").trim();
   return text || fallback;
+}
+
+function normalizeColor(value: unknown, fallback: string): string {
+  const text = String(value ?? "").trim();
+  if (/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(text)) {
+    return text.toLowerCase();
+  }
+
+  return fallback;
 }
 
 let pool: Pool | null = null;
@@ -192,6 +218,26 @@ async function initializeSchema(): Promise<void> {
       kick_message_template TEXT NULL,
       ban_message_template TEXT NULL,
       mute_message_template TEXT NULL,
+      level_card_font VARCHAR(40) NOT NULL DEFAULT 'default',
+      level_card_primary_color VARCHAR(9) NOT NULL DEFAULT '#66f2c4',
+      level_card_accent_color VARCHAR(9) NOT NULL DEFAULT '#6da8ff',
+      level_card_background_url TEXT NULL,
+      level_card_overlay_opacity DOUBLE PRECISION NOT NULL DEFAULT 0.38,
+      welcome_card_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+      welcome_card_title_template TEXT NULL,
+      welcome_card_subtitle_template TEXT NULL,
+      welcome_card_font VARCHAR(40) NOT NULL DEFAULT 'default',
+      welcome_card_primary_color VARCHAR(9) NOT NULL DEFAULT '#f8fafc',
+      welcome_card_accent_color VARCHAR(9) NOT NULL DEFAULT '#6dd6ff',
+      welcome_card_background_url TEXT NULL,
+      welcome_card_overlay_opacity DOUBLE PRECISION NOT NULL DEFAULT 0.48,
+      ticket_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+      ticket_trigger_channel_id VARCHAR(22) NULL,
+      ticket_trigger_message_id VARCHAR(22) NULL,
+      ticket_trigger_emoji VARCHAR(60) NOT NULL DEFAULT '🎫',
+      ticket_category_channel_id VARCHAR(22) NULL,
+      ticket_support_role_id VARCHAR(22) NULL,
+      ticket_welcome_template TEXT NULL,
       admin_role_name VARCHAR(80) NOT NULL DEFAULT 'Admin',
       mod_role_name VARCHAR(80) NOT NULL DEFAULT 'Moderator',
       sync_mode VARCHAR(24) NOT NULL DEFAULT 'global',
@@ -263,11 +309,65 @@ async function initializeSchema(): Promise<void> {
     )
   `);
 
+  await execute(`
+    CREATE TABLE IF NOT EXISTS reaction_roles (
+      id BIGSERIAL PRIMARY KEY,
+      guild_id VARCHAR(22) NOT NULL,
+      channel_id VARCHAR(22) NOT NULL,
+      message_id VARCHAR(22) NOT NULL,
+      emoji_key TEXT NOT NULL,
+      emoji_display TEXT NOT NULL,
+      role_id VARCHAR(22) NOT NULL,
+      created_by_user_id VARCHAR(22) NULL,
+      created_at VARCHAR(64) NOT NULL,
+      UNIQUE (guild_id, channel_id, message_id, emoji_key, role_id)
+    )
+  `);
+
+  await execute(`
+    CREATE TABLE IF NOT EXISTS reaction_role_panels (
+      guild_id VARCHAR(22) NOT NULL,
+      channel_id VARCHAR(22) NOT NULL,
+      message_id VARCHAR(22) NOT NULL,
+      content TEXT NOT NULL,
+      created_at VARCHAR(64) NOT NULL,
+      updated_at VARCHAR(64) NOT NULL,
+      PRIMARY KEY (guild_id, message_id)
+    )
+  `);
+
   await ensureTableColumn("guild_config", "welcome_message_template", "TEXT NULL");
   await ensureTableColumn("guild_config", "levelup_message_template", "TEXT NULL");
   await ensureTableColumn("guild_config", "kick_message_template", "TEXT NULL");
   await ensureTableColumn("guild_config", "ban_message_template", "TEXT NULL");
   await ensureTableColumn("guild_config", "mute_message_template", "TEXT NULL");
+  await ensureTableColumn("guild_config", "level_card_font", "VARCHAR(40) NOT NULL DEFAULT 'default'");
+  await ensureTableColumn("guild_config", "level_card_primary_color", "VARCHAR(9) NOT NULL DEFAULT '#66f2c4'");
+  await ensureTableColumn("guild_config", "level_card_accent_color", "VARCHAR(9) NOT NULL DEFAULT '#6da8ff'");
+  await ensureTableColumn("guild_config", "level_card_background_url", "TEXT NULL");
+  await ensureTableColumn("guild_config", "level_card_overlay_opacity", "DOUBLE PRECISION NOT NULL DEFAULT 0.38");
+  await ensureTableColumn("guild_config", "welcome_card_enabled", "BOOLEAN NOT NULL DEFAULT FALSE");
+  await ensureTableColumn("guild_config", "welcome_card_title_template", "TEXT NULL");
+  await ensureTableColumn("guild_config", "welcome_card_subtitle_template", "TEXT NULL");
+  await ensureTableColumn("guild_config", "welcome_card_font", "VARCHAR(40) NOT NULL DEFAULT 'default'");
+  await ensureTableColumn("guild_config", "welcome_card_primary_color", "VARCHAR(9) NOT NULL DEFAULT '#f8fafc'");
+  await ensureTableColumn("guild_config", "welcome_card_accent_color", "VARCHAR(9) NOT NULL DEFAULT '#6dd6ff'");
+  await ensureTableColumn("guild_config", "welcome_card_background_url", "TEXT NULL");
+  await ensureTableColumn("guild_config", "welcome_card_overlay_opacity", "DOUBLE PRECISION NOT NULL DEFAULT 0.48");
+  await ensureTableColumn("guild_config", "ticket_enabled", "BOOLEAN NOT NULL DEFAULT FALSE");
+  await ensureTableColumn("guild_config", "ticket_trigger_channel_id", "VARCHAR(22) NULL");
+  await ensureTableColumn("guild_config", "ticket_trigger_message_id", "VARCHAR(22) NULL");
+  await ensureTableColumn("guild_config", "ticket_trigger_emoji", "VARCHAR(60) NOT NULL DEFAULT '🎫'");
+  await ensureTableColumn("guild_config", "ticket_category_channel_id", "VARCHAR(22) NULL");
+  await ensureTableColumn("guild_config", "ticket_support_role_id", "VARCHAR(22) NULL");
+  await ensureTableColumn("guild_config", "ticket_welcome_template", "TEXT NULL");
+
+  await execute(
+    "CREATE INDEX IF NOT EXISTS idx_reaction_roles_lookup ON reaction_roles (guild_id, channel_id, message_id, emoji_key)"
+  );
+  await execute(
+    "CREATE INDEX IF NOT EXISTS idx_reaction_role_panels_lookup ON reaction_role_panels (guild_id, channel_id, message_id)"
+  );
 
   await execute(
     "UPDATE guild_config SET welcome_message_template = $1 WHERE welcome_message_template IS NULL OR TRIM(welcome_message_template) = ''",
@@ -288,6 +388,22 @@ async function initializeSchema(): Promise<void> {
   await execute(
     "UPDATE guild_config SET mute_message_template = $1 WHERE mute_message_template IS NULL OR TRIM(mute_message_template) = ''",
     [DEFAULT_MUTE_MESSAGE_TEMPLATE]
+  );
+  await execute(
+    "UPDATE guild_config SET welcome_card_title_template = $1 WHERE welcome_card_title_template IS NULL OR TRIM(welcome_card_title_template) = ''",
+    [DEFAULT_WELCOME_CARD_TITLE_TEMPLATE]
+  );
+  await execute(
+    "UPDATE guild_config SET welcome_card_subtitle_template = $1 WHERE welcome_card_subtitle_template IS NULL OR TRIM(welcome_card_subtitle_template) = ''",
+    [DEFAULT_WELCOME_CARD_SUBTITLE_TEMPLATE]
+  );
+  await execute(
+    "UPDATE guild_config SET ticket_trigger_emoji = $1 WHERE ticket_trigger_emoji IS NULL OR TRIM(ticket_trigger_emoji) = ''",
+    [DEFAULT_TICKET_TRIGGER_EMOJI]
+  );
+  await execute(
+    "UPDATE guild_config SET ticket_welcome_template = $1 WHERE ticket_welcome_template IS NULL OR TRIM(ticket_welcome_template) = ''",
+    [DEFAULT_TICKET_WELCOME_TEMPLATE]
   );
 }
 
@@ -366,6 +482,32 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfigRecord
       row.mute_message_template,
       DEFAULT_MUTE_MESSAGE_TEMPLATE
     ),
+    level_card_font: String(row.level_card_font || DEFAULT_LEVEL_CARD_FONT),
+    level_card_primary_color: normalizeColor(row.level_card_primary_color, DEFAULT_LEVEL_CARD_PRIMARY_COLOR),
+    level_card_accent_color: normalizeColor(row.level_card_accent_color, DEFAULT_LEVEL_CARD_ACCENT_COLOR),
+    level_card_background_url: row.level_card_background_url ? String(row.level_card_background_url) : null,
+    level_card_overlay_opacity: Math.max(0, Math.min(toFloat(row.level_card_overlay_opacity, DEFAULT_LEVEL_CARD_OVERLAY_OPACITY), 1)),
+    welcome_card_enabled: toBoolean(row.welcome_card_enabled),
+    welcome_card_title_template: normalizeTemplateText(
+      row.welcome_card_title_template,
+      DEFAULT_WELCOME_CARD_TITLE_TEMPLATE
+    ),
+    welcome_card_subtitle_template: normalizeTemplateText(
+      row.welcome_card_subtitle_template,
+      DEFAULT_WELCOME_CARD_SUBTITLE_TEMPLATE
+    ),
+    welcome_card_font: String(row.welcome_card_font || DEFAULT_WELCOME_CARD_FONT),
+    welcome_card_primary_color: normalizeColor(row.welcome_card_primary_color, DEFAULT_WELCOME_CARD_PRIMARY_COLOR),
+    welcome_card_accent_color: normalizeColor(row.welcome_card_accent_color, DEFAULT_WELCOME_CARD_ACCENT_COLOR),
+    welcome_card_background_url: row.welcome_card_background_url ? String(row.welcome_card_background_url) : null,
+    welcome_card_overlay_opacity: Math.max(0, Math.min(toFloat(row.welcome_card_overlay_opacity, DEFAULT_WELCOME_CARD_OVERLAY_OPACITY), 1)),
+    ticket_enabled: toBoolean(row.ticket_enabled),
+    ticket_trigger_channel_id: toSnowflake(row.ticket_trigger_channel_id),
+    ticket_trigger_message_id: toSnowflake(row.ticket_trigger_message_id),
+    ticket_trigger_emoji: String(row.ticket_trigger_emoji || DEFAULT_TICKET_TRIGGER_EMOJI),
+    ticket_category_channel_id: toSnowflake(row.ticket_category_channel_id),
+    ticket_support_role_id: toSnowflake(row.ticket_support_role_id),
+    ticket_welcome_template: normalizeTemplateText(row.ticket_welcome_template, DEFAULT_TICKET_WELCOME_TEMPLATE),
     admin_role_name: String(row.admin_role_name || "Admin"),
     mod_role_name: String(row.mod_role_name || "Moderator"),
     verification_url: row.verification_url ? String(row.verification_url) : null,
@@ -397,6 +539,26 @@ export async function updateGuildConfig(
     "kick_message_template",
     "ban_message_template",
     "mute_message_template",
+    "level_card_font",
+    "level_card_primary_color",
+    "level_card_accent_color",
+    "level_card_background_url",
+    "level_card_overlay_opacity",
+    "welcome_card_enabled",
+    "welcome_card_title_template",
+    "welcome_card_subtitle_template",
+    "welcome_card_font",
+    "welcome_card_primary_color",
+    "welcome_card_accent_color",
+    "welcome_card_background_url",
+    "welcome_card_overlay_opacity",
+    "ticket_enabled",
+    "ticket_trigger_channel_id",
+    "ticket_trigger_message_id",
+    "ticket_trigger_emoji",
+    "ticket_category_channel_id",
+    "ticket_support_role_id",
+    "ticket_welcome_template",
     "admin_role_name",
     "mod_role_name",
     "verification_url",
@@ -416,6 +578,11 @@ export async function updateGuildConfig(
 
   for (const [key, rawValue] of entries) {
     if (key.endsWith("_channel_id")) {
+      normalized[key] = toSnowflake(rawValue);
+      continue;
+    }
+
+    if (key === "ticket_trigger_message_id" || key === "ticket_support_role_id") {
       normalized[key] = toSnowflake(rawValue);
       continue;
     }
@@ -442,6 +609,80 @@ export async function updateGuildConfig(
 
     if (key === "mute_message_template") {
       normalized[key] = normalizeTemplateText(rawValue, DEFAULT_MUTE_MESSAGE_TEMPLATE);
+      continue;
+    }
+
+    if (key === "welcome_card_title_template") {
+      normalized[key] = normalizeTemplateText(rawValue, DEFAULT_WELCOME_CARD_TITLE_TEMPLATE);
+      continue;
+    }
+
+    if (key === "welcome_card_subtitle_template") {
+      normalized[key] = normalizeTemplateText(rawValue, DEFAULT_WELCOME_CARD_SUBTITLE_TEMPLATE);
+      continue;
+    }
+
+    if (key === "ticket_welcome_template") {
+      normalized[key] = normalizeTemplateText(rawValue, DEFAULT_TICKET_WELCOME_TEMPLATE);
+      continue;
+    }
+
+    if (key === "level_card_font") {
+      const text = String(rawValue ?? "").trim().toLowerCase();
+      normalized[key] = text || DEFAULT_LEVEL_CARD_FONT;
+      continue;
+    }
+
+    if (key === "welcome_card_font") {
+      const text = String(rawValue ?? "").trim().toLowerCase();
+      normalized[key] = text || DEFAULT_WELCOME_CARD_FONT;
+      continue;
+    }
+
+    if (key === "level_card_primary_color") {
+      normalized[key] = normalizeColor(rawValue, DEFAULT_LEVEL_CARD_PRIMARY_COLOR);
+      continue;
+    }
+
+    if (key === "level_card_accent_color") {
+      normalized[key] = normalizeColor(rawValue, DEFAULT_LEVEL_CARD_ACCENT_COLOR);
+      continue;
+    }
+
+    if (key === "welcome_card_primary_color") {
+      normalized[key] = normalizeColor(rawValue, DEFAULT_WELCOME_CARD_PRIMARY_COLOR);
+      continue;
+    }
+
+    if (key === "welcome_card_accent_color") {
+      normalized[key] = normalizeColor(rawValue, DEFAULT_WELCOME_CARD_ACCENT_COLOR);
+      continue;
+    }
+
+    if (key === "level_card_background_url" || key === "welcome_card_background_url") {
+      const text = String(rawValue ?? "").trim();
+      normalized[key] = text || null;
+      continue;
+    }
+
+    if (key === "level_card_overlay_opacity") {
+      normalized[key] = Math.max(0, Math.min(toFloat(rawValue, DEFAULT_LEVEL_CARD_OVERLAY_OPACITY), 1));
+      continue;
+    }
+
+    if (key === "welcome_card_overlay_opacity") {
+      normalized[key] = Math.max(0, Math.min(toFloat(rawValue, DEFAULT_WELCOME_CARD_OVERLAY_OPACITY), 1));
+      continue;
+    }
+
+    if (key === "welcome_card_enabled" || key === "ticket_enabled") {
+      normalized[key] = toBoolean(rawValue);
+      continue;
+    }
+
+    if (key === "ticket_trigger_emoji") {
+      const text = String(rawValue ?? "").trim();
+      normalized[key] = text || DEFAULT_TICKET_TRIGGER_EMOJI;
       continue;
     }
 
@@ -624,7 +865,9 @@ export async function getCommandStates(guildId: string): Promise<CommandToggleRe
     }
   }
 
-  return seeded.sort((a, b) => a.command_name.localeCompare(b.command_name));
+  return seeded
+    .filter((row) => !DEPRECATED_TOGGLEABLE_COMMANDS.has(row.command_name))
+    .sort((a, b) => a.command_name.localeCompare(b.command_name));
 }
 
 export async function setCommandEnabled(
@@ -636,6 +879,10 @@ export async function setCommandEnabled(
   const normalized = normalizeCommandName(commandName);
   if (!normalized) {
     throw new Error("Invalid command name");
+  }
+
+  if (DEPRECATED_TOGGLEABLE_COMMANDS.has(normalized)) {
+    throw new Error("Legacy reaction-role commands are dashboard-managed and cannot be toggled.");
   }
 
   const updatedAt = nowIso();
@@ -758,4 +1005,312 @@ export async function markStaffTotpVerified(
   );
 
   return getStaffTotpAuth(guildId, userId);
+}
+
+type ReactionRolePanelCreateInput = {
+  channelId: string;
+  messageId: string;
+  content: string;
+  mappings: Array<{
+    emojiKey: string;
+    emojiDisplay: string;
+    roleId: string;
+  }>;
+  createdByUserId?: string | null;
+};
+
+async function getReactionRolePanelByMessage(
+  guildId: string,
+  messageId: string
+): Promise<ReactionRolePanelRecord | null> {
+  const panelRows = await queryRows<Record<string, unknown>>(
+    `
+      SELECT guild_id, channel_id, message_id, content, created_at, updated_at
+      FROM reaction_role_panels
+      WHERE guild_id = $1 AND message_id = $2
+      LIMIT 1
+    `,
+    [guildId, messageId]
+  );
+  const panelRow = panelRows[0];
+  if (!panelRow) {
+    return null;
+  }
+
+  const mappingRows = await queryRows<Record<string, unknown>>(
+    `
+      SELECT guild_id, channel_id, message_id, emoji_key, emoji_display, role_id, created_at
+      FROM reaction_roles
+      WHERE guild_id = $1 AND message_id = $2
+      ORDER BY created_at ASC, emoji_display ASC, role_id ASC
+    `,
+    [guildId, messageId]
+  );
+
+  const mappings = mappingRows
+    .map((row) => {
+      const normalizedRoleId = toSnowflake(row.role_id);
+      const normalizedChannelId = toSnowflake(row.channel_id);
+      const normalizedMessageId = toSnowflake(row.message_id);
+      const emojiKey = String(row.emoji_key || "").trim();
+      const emojiDisplay = String(row.emoji_display || "").trim();
+
+      if (!normalizedRoleId || !normalizedChannelId || !normalizedMessageId || !emojiKey || !emojiDisplay) {
+        return null;
+      }
+
+      const mapped: ReactionRoleMappingRecord = {
+        guild_id: String(toSnowflake(row.guild_id) || guildId),
+        channel_id: normalizedChannelId,
+        message_id: normalizedMessageId,
+        emoji_key: emojiKey,
+        emoji_display: emojiDisplay,
+        role_id: normalizedRoleId,
+        created_at: String(row.created_at || nowIso())
+      };
+
+      return mapped;
+    })
+    .filter((item): item is ReactionRoleMappingRecord => Boolean(item));
+
+  const normalizedChannelId = toSnowflake(panelRow.channel_id);
+  const normalizedMessageId = toSnowflake(panelRow.message_id);
+  if (!normalizedChannelId || !normalizedMessageId) {
+    return null;
+  }
+
+  return {
+    guild_id: String(toSnowflake(panelRow.guild_id) || guildId),
+    channel_id: normalizedChannelId,
+    message_id: normalizedMessageId,
+    content: String(panelRow.content || ""),
+    created_at: String(panelRow.created_at || nowIso()),
+    updated_at: String(panelRow.updated_at || nowIso()),
+    mappings
+  };
+}
+
+export async function listReactionRolePanels(guildId: string): Promise<ReactionRolePanelRecord[]> {
+  await ensureInitialized();
+  const normalizedGuildId = toSnowflake(guildId);
+  if (!normalizedGuildId) {
+    return [];
+  }
+
+  const panelRows = await queryRows<Record<string, unknown>>(
+    `
+      SELECT guild_id, channel_id, message_id, content, created_at, updated_at
+      FROM reaction_role_panels
+      WHERE guild_id = $1
+      ORDER BY updated_at DESC, created_at DESC
+    `,
+    [normalizedGuildId]
+  );
+
+  const mappingRows = await queryRows<Record<string, unknown>>(
+    `
+      SELECT guild_id, channel_id, message_id, emoji_key, emoji_display, role_id, created_at
+      FROM reaction_roles
+      WHERE guild_id = $1
+      ORDER BY message_id ASC, created_at ASC, emoji_display ASC, role_id ASC
+    `,
+    [normalizedGuildId]
+  );
+
+  const mappingsByMessageId = new Map<string, ReactionRoleMappingRecord[]>();
+  for (const row of mappingRows) {
+    const normalizedRoleId = toSnowflake(row.role_id);
+    const normalizedChannelId = toSnowflake(row.channel_id);
+    const normalizedMessageId = toSnowflake(row.message_id);
+    const emojiKey = String(row.emoji_key || "").trim();
+    const emojiDisplay = String(row.emoji_display || "").trim();
+
+    if (!normalizedRoleId || !normalizedChannelId || !normalizedMessageId || !emojiKey || !emojiDisplay) {
+      continue;
+    }
+
+    const mapped: ReactionRoleMappingRecord = {
+      guild_id: String(toSnowflake(row.guild_id) || normalizedGuildId),
+      channel_id: normalizedChannelId,
+      message_id: normalizedMessageId,
+      emoji_key: emojiKey,
+      emoji_display: emojiDisplay,
+      role_id: normalizedRoleId,
+      created_at: String(row.created_at || nowIso())
+    };
+
+    const list = mappingsByMessageId.get(normalizedMessageId) || [];
+    list.push(mapped);
+    mappingsByMessageId.set(normalizedMessageId, list);
+  }
+
+  return panelRows
+    .map((row) => {
+      const normalizedChannelId = toSnowflake(row.channel_id);
+      const normalizedMessageId = toSnowflake(row.message_id);
+      if (!normalizedChannelId || !normalizedMessageId) {
+        return null;
+      }
+
+      const panel: ReactionRolePanelRecord = {
+        guild_id: String(toSnowflake(row.guild_id) || normalizedGuildId),
+        channel_id: normalizedChannelId,
+        message_id: normalizedMessageId,
+        content: String(row.content || ""),
+        created_at: String(row.created_at || nowIso()),
+        updated_at: String(row.updated_at || nowIso()),
+        mappings: mappingsByMessageId.get(normalizedMessageId) || []
+      };
+
+      return panel;
+    })
+    .filter((panel): panel is ReactionRolePanelRecord => Boolean(panel));
+}
+
+export async function createReactionRolePanel(
+  guildId: string,
+  input: ReactionRolePanelCreateInput
+): Promise<ReactionRolePanelRecord> {
+  await ensureInitialized();
+  const normalizedGuildId = toSnowflake(guildId);
+  const normalizedChannelId = toSnowflake(input.channelId);
+  const normalizedMessageId = toSnowflake(input.messageId);
+
+  if (!normalizedGuildId || !normalizedChannelId || !normalizedMessageId) {
+    throw new Error("Invalid reaction role panel identifiers");
+  }
+
+  const content = String(input.content ?? "").trim();
+  const mappingSource = Array.isArray(input.mappings) ? input.mappings : [];
+  if (mappingSource.length === 0) {
+    throw new Error("At least one reaction role mapping is required");
+  }
+
+  const uniqueMappings = new Map<string, { emojiKey: string; emojiDisplay: string; roleId: string }>();
+  for (const rawMapping of mappingSource) {
+    const emojiKey = String(rawMapping?.emojiKey || "").trim();
+    const emojiDisplay = String(rawMapping?.emojiDisplay || "").trim();
+    const roleId = toSnowflake(rawMapping?.roleId);
+    if (!emojiKey || !emojiDisplay || !roleId) {
+      continue;
+    }
+
+    uniqueMappings.set(`${emojiKey}:${roleId}`, {
+      emojiKey,
+      emojiDisplay,
+      roleId
+    });
+  }
+
+  const mappings = [...uniqueMappings.values()];
+  if (mappings.length === 0) {
+    throw new Error("No valid reaction role mappings were provided");
+  }
+
+  const createdByUserId = toSnowflake(input.createdByUserId);
+  const timestamp = nowIso();
+  const client = await getPool().connect();
+
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `
+        INSERT INTO reaction_role_panels (guild_id, channel_id, message_id, content, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $5)
+        ON CONFLICT (guild_id, message_id) DO UPDATE SET
+          channel_id = EXCLUDED.channel_id,
+          content = EXCLUDED.content,
+          updated_at = EXCLUDED.updated_at
+      `,
+      [normalizedGuildId, normalizedChannelId, normalizedMessageId, content, timestamp]
+    );
+
+    await client.query(
+      `
+        DELETE FROM reaction_roles
+        WHERE guild_id = $1 AND message_id = $2
+      `,
+      [normalizedGuildId, normalizedMessageId]
+    );
+
+    for (const mapping of mappings) {
+      await client.query(
+        `
+          INSERT INTO reaction_roles (
+            guild_id,
+            channel_id,
+            message_id,
+            emoji_key,
+            emoji_display,
+            role_id,
+            created_by_user_id,
+            created_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          ON CONFLICT (guild_id, channel_id, message_id, emoji_key, role_id)
+          DO NOTHING
+        `,
+        [
+          normalizedGuildId,
+          normalizedChannelId,
+          normalizedMessageId,
+          mapping.emojiKey,
+          mapping.emojiDisplay,
+          mapping.roleId,
+          createdByUserId,
+          timestamp
+        ]
+      );
+    }
+
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  const panel = await getReactionRolePanelByMessage(normalizedGuildId, normalizedMessageId);
+  if (!panel) {
+    throw new Error("Failed to persist reaction role panel");
+  }
+
+  return panel;
+}
+
+export async function deleteReactionRolePanel(guildId: string, messageId: string): Promise<boolean> {
+  await ensureInitialized();
+  const normalizedGuildId = toSnowflake(guildId);
+  const normalizedMessageId = toSnowflake(messageId);
+  if (!normalizedGuildId || !normalizedMessageId) {
+    throw new Error("Invalid reaction role panel identifiers");
+  }
+
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const mappingResult = await client.query(
+      `
+        DELETE FROM reaction_roles
+        WHERE guild_id = $1 AND message_id = $2
+      `,
+      [normalizedGuildId, normalizedMessageId]
+    );
+
+    const panelResult = await client.query(
+      `
+        DELETE FROM reaction_role_panels
+        WHERE guild_id = $1 AND message_id = $2
+      `,
+      [normalizedGuildId, normalizedMessageId]
+    );
+
+    await client.query("COMMIT");
+    return (mappingResult.rowCount || 0) > 0 || (panelResult.rowCount || 0) > 0;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
