@@ -21,6 +21,12 @@ type ReactionRoleDraftRow = {
   roleId: string;
 };
 
+type LoadOverviewOptions = {
+  silent?: boolean;
+};
+
+type CardBackgroundField = "level_card_background_url" | "welcome_card_background_url";
+
 type OverviewPayload = {
   guild: {
     id: string;
@@ -159,6 +165,52 @@ function boolDraftValue(value: boolean): string {
   return value ? "1" : "0";
 }
 
+function buildConfigDraft(config: OverviewPayload["config"]): Record<string, string> {
+  return {
+    log_channel_id: toInputValue(config.log_channel_id),
+    welcome_channel_id: toInputValue(config.welcome_channel_id),
+    rules_channel_id: toInputValue(config.rules_channel_id),
+    chat_channel_id: toInputValue(config.chat_channel_id),
+    help_channel_id: toInputValue(config.help_channel_id),
+    about_channel_id: toInputValue(config.about_channel_id),
+    perks_channel_id: toInputValue(config.perks_channel_id),
+    leveling_channel_id: toInputValue(config.leveling_channel_id),
+    verification_url: toInputValue(config.verification_url),
+    raid_gate_threshold: numberInput(config.raid_gate_threshold),
+    raid_monitor_window_seconds: numberInput(config.raid_monitor_window_seconds),
+    raid_join_rate_threshold: numberInput(config.raid_join_rate_threshold),
+    gate_duration_seconds: numberInput(config.gate_duration_seconds),
+    join_gate_mode: config.join_gate_mode,
+    welcome_message_template: config.welcome_message_template,
+    levelup_message_template: config.levelup_message_template,
+    kick_message_template: config.kick_message_template,
+    ban_message_template: config.ban_message_template,
+    mute_message_template: config.mute_message_template,
+    level_card_font: config.level_card_font,
+    level_card_primary_color: config.level_card_primary_color,
+    level_card_accent_color: config.level_card_accent_color,
+    level_card_background_url: toInputValue(config.level_card_background_url),
+    level_card_overlay_opacity: numberInput(config.level_card_overlay_opacity),
+    welcome_card_enabled: boolDraftValue(config.welcome_card_enabled),
+    welcome_card_title_template: config.welcome_card_title_template,
+    welcome_card_subtitle_template: config.welcome_card_subtitle_template,
+    welcome_card_font: config.welcome_card_font,
+    welcome_card_primary_color: config.welcome_card_primary_color,
+    welcome_card_accent_color: config.welcome_card_accent_color,
+    welcome_card_background_url: toInputValue(config.welcome_card_background_url),
+    welcome_card_overlay_opacity: numberInput(config.welcome_card_overlay_opacity),
+    ticket_enabled: boolDraftValue(config.ticket_enabled),
+    ticket_trigger_channel_id: toInputValue(config.ticket_trigger_channel_id),
+    ticket_trigger_message_id: toInputValue(config.ticket_trigger_message_id),
+    ticket_trigger_emoji: config.ticket_trigger_emoji,
+    ticket_category_channel_id: toInputValue(config.ticket_category_channel_id),
+    ticket_support_role_id: toInputValue(config.ticket_support_role_id),
+    ticket_welcome_template: config.ticket_welcome_template,
+    admin_role_name: config.admin_role_name,
+    mod_role_name: config.mod_role_name
+  };
+}
+
 export function GuildConsoleClient({ guildId }: { guildId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -168,15 +220,25 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
   const [raidDuration, setRaidDuration] = useState("900");
   const [raidReason, setRaidReason] = useState("Dashboard toggle");
   const [configDraft, setConfigDraft] = useState<Record<string, string>>({});
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [commandDraft, setCommandDraft] = useState<Record<string, boolean>>({});
+  const [raidGateDraftEnabled, setRaidGateDraftEnabled] = useState(false);
+  const [raidGateDraftDirty, setRaidGateDraftDirty] = useState(false);
   const [reactionPanelChannelId, setReactionPanelChannelId] = useState("");
   const [reactionPanelContent, setReactionPanelContent] = useState("");
   const [reactionPanelMappings, setReactionPanelMappings] = useState<ReactionRoleDraftRow[]>([{ emoji: "", roleId: "" }]);
   const [creatingReactionPanel, setCreatingReactionPanel] = useState(false);
   const [removingReactionPanelMessageId, setRemovingReactionPanelMessageId] = useState<string | null>(null);
   const [editingReactionPanel, setEditingReactionPanel] = useState<{ messageId: string; channelId: string } | null>(null);
+  const [levelCardBackgroundFile, setLevelCardBackgroundFile] = useState<File | null>(null);
+  const [welcomeCardBackgroundFile, setWelcomeCardBackgroundFile] = useState<File | null>(null);
+  const [uploadingBackgroundTarget, setUploadingBackgroundTarget] = useState<CardBackgroundField | null>(null);
 
-  const loadOverview = useCallback(async () => {
-    setLoading(true);
+  const loadOverview = useCallback(async (options: LoadOverviewOptions = {}) => {
+    const silent = Boolean(options.silent);
+    if (!silent) {
+      setLoading(true);
+    }
     setError(null);
 
     try {
@@ -188,54 +250,19 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
 
       const payload = data as OverviewPayload;
       setOverview(payload);
-      setConfigDraft({
-        log_channel_id: toInputValue(payload.config.log_channel_id),
-        welcome_channel_id: toInputValue(payload.config.welcome_channel_id),
-        rules_channel_id: toInputValue(payload.config.rules_channel_id),
-        chat_channel_id: toInputValue(payload.config.chat_channel_id),
-        help_channel_id: toInputValue(payload.config.help_channel_id),
-        about_channel_id: toInputValue(payload.config.about_channel_id),
-        perks_channel_id: toInputValue(payload.config.perks_channel_id),
-        leveling_channel_id: toInputValue(payload.config.leveling_channel_id),
-        verification_url: toInputValue(payload.config.verification_url),
-        raid_gate_threshold: numberInput(payload.config.raid_gate_threshold),
-        raid_monitor_window_seconds: numberInput(payload.config.raid_monitor_window_seconds),
-        raid_join_rate_threshold: numberInput(payload.config.raid_join_rate_threshold),
-        gate_duration_seconds: numberInput(payload.config.gate_duration_seconds),
-        join_gate_mode: payload.config.join_gate_mode,
-        welcome_message_template: payload.config.welcome_message_template,
-        levelup_message_template: payload.config.levelup_message_template,
-        kick_message_template: payload.config.kick_message_template,
-        ban_message_template: payload.config.ban_message_template,
-        mute_message_template: payload.config.mute_message_template,
-        level_card_font: payload.config.level_card_font,
-        level_card_primary_color: payload.config.level_card_primary_color,
-        level_card_accent_color: payload.config.level_card_accent_color,
-        level_card_background_url: toInputValue(payload.config.level_card_background_url),
-        level_card_overlay_opacity: numberInput(payload.config.level_card_overlay_opacity),
-        welcome_card_enabled: boolDraftValue(payload.config.welcome_card_enabled),
-        welcome_card_title_template: payload.config.welcome_card_title_template,
-        welcome_card_subtitle_template: payload.config.welcome_card_subtitle_template,
-        welcome_card_font: payload.config.welcome_card_font,
-        welcome_card_primary_color: payload.config.welcome_card_primary_color,
-        welcome_card_accent_color: payload.config.welcome_card_accent_color,
-        welcome_card_background_url: toInputValue(payload.config.welcome_card_background_url),
-        welcome_card_overlay_opacity: numberInput(payload.config.welcome_card_overlay_opacity),
-        ticket_enabled: boolDraftValue(payload.config.ticket_enabled),
-        ticket_trigger_channel_id: toInputValue(payload.config.ticket_trigger_channel_id),
-        ticket_trigger_message_id: toInputValue(payload.config.ticket_trigger_message_id),
-        ticket_trigger_emoji: payload.config.ticket_trigger_emoji,
-        ticket_category_channel_id: toInputValue(payload.config.ticket_category_channel_id),
-        ticket_support_role_id: toInputValue(payload.config.ticket_support_role_id),
-        ticket_welcome_template: payload.config.ticket_welcome_template,
-        admin_role_name: payload.config.admin_role_name,
-        mod_role_name: payload.config.mod_role_name
-      });
+      setConfigDraft(buildConfigDraft(payload.config));
+      setCommandDraft(
+        Object.fromEntries(payload.commandStates.map((entry) => [entry.command_name, entry.enabled]))
+      );
+      setRaidGateDraftEnabled(payload.raidGate.gate_active);
+      setRaidGateDraftDirty(false);
       setRaidDuration(numberInput(payload.config.gate_duration_seconds));
     } catch (loadError) {
       setError(String(loadError instanceof Error ? loadError.message : loadError));
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [guildId]);
 
@@ -244,6 +271,50 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
   }, [loadOverview]);
 
   const commandStates = useMemo(() => overview?.commandStates || [], [overview?.commandStates]);
+  const persistedConfigDraft = useMemo(
+    () => (overview ? buildConfigDraft(overview.config) : null),
+    [overview]
+  );
+  const hasPendingConfigChanges = useMemo(() => {
+    if (!persistedConfigDraft) {
+      return false;
+    }
+
+    const keys = new Set([...Object.keys(persistedConfigDraft), ...Object.keys(configDraft)]);
+    for (const key of keys) {
+      if ((configDraft[key] ?? "") !== (persistedConfigDraft[key] ?? "")) {
+        return true;
+      }
+    }
+
+    return false;
+  }, [configDraft, persistedConfigDraft]);
+  const commandRows = useMemo(() => {
+    return commandStates.map((entry) => {
+      const stagedEnabled =
+        Object.prototype.hasOwnProperty.call(commandDraft, entry.command_name)
+          ? Boolean(commandDraft[entry.command_name])
+          : entry.enabled;
+
+      return {
+        ...entry,
+        stagedEnabled,
+        dirty: stagedEnabled !== entry.enabled
+      };
+    });
+  }, [commandDraft, commandStates]);
+  const hasPendingCommandChanges = useMemo(
+    () => commandRows.some((entry) => entry.dirty),
+    [commandRows]
+  );
+  const hasPendingRaidGateChange = useMemo(() => {
+    if (!overview) {
+      return false;
+    }
+
+    return raidGateDraftDirty || raidGateDraftEnabled !== overview.raidGate.gate_active;
+  }, [overview, raidGateDraftEnabled, raidGateDraftDirty]);
+  const hasPendingSaveChanges = hasPendingConfigChanges || hasPendingCommandChanges || hasPendingRaidGateChange;
   const assignableChannels = useMemo(() => {
     const channels = overview?.channels || [];
     const filtered = channels.filter((channel) => TEXT_LIKE_CHANNEL_TYPES.has(channel.type));
@@ -305,60 +376,110 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
   }, [assignableChannels, reactionPanelChannelId]);
 
   async function saveConfig(): Promise<void> {
+    if (!hasPendingSaveChanges) {
+      setNotice("No pending changes to save.");
+      return;
+    }
+
     setNotice(null);
     setError(null);
+    setSavingConfig(true);
 
-    const payload = {
-      updates: {
-        ...configDraft,
-        raid_gate_threshold: Number(configDraft.raid_gate_threshold || "0.72"),
-        raid_monitor_window_seconds: Number(configDraft.raid_monitor_window_seconds || "90"),
-        raid_join_rate_threshold: Number(configDraft.raid_join_rate_threshold || "8"),
-        gate_duration_seconds: Number(configDraft.gate_duration_seconds || "900"),
-        level_card_overlay_opacity: Number(configDraft.level_card_overlay_opacity || "0.38"),
-        welcome_card_overlay_opacity: Number(configDraft.welcome_card_overlay_opacity || "0.48"),
-        welcome_card_enabled: draftBool(configDraft.welcome_card_enabled),
-        ticket_enabled: draftBool(configDraft.ticket_enabled),
-        join_gate_mode: configDraft.join_gate_mode === "kick" ? "kick" : "timeout"
+    const failures: string[] = [];
+
+    try {
+      if (hasPendingConfigChanges) {
+        const payload = {
+          updates: {
+            ...configDraft,
+            raid_gate_threshold: Number(configDraft.raid_gate_threshold || "0.72"),
+            raid_monitor_window_seconds: Number(configDraft.raid_monitor_window_seconds || "90"),
+            raid_join_rate_threshold: Number(configDraft.raid_join_rate_threshold || "8"),
+            gate_duration_seconds: Number(configDraft.gate_duration_seconds || "900"),
+            level_card_overlay_opacity: Number(configDraft.level_card_overlay_opacity || "0.38"),
+            welcome_card_overlay_opacity: Number(configDraft.welcome_card_overlay_opacity || "0.48"),
+            welcome_card_enabled: draftBool(configDraft.welcome_card_enabled),
+            ticket_enabled: draftBool(configDraft.ticket_enabled),
+            join_gate_mode: configDraft.join_gate_mode === "kick" ? "kick" : "timeout"
+          }
+        };
+
+        const response = await fetch(`/api/guild/${guildId}/config`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(payload)
+        });
+
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        if (!response.ok) {
+          failures.push(data.error || "Failed to save settings.");
+        }
       }
-    };
 
-    const response = await fetch(`/api/guild/${guildId}/config`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payload)
-    });
+      for (const entry of commandRows) {
+        if (!entry.dirty) {
+          continue;
+        }
 
-    const data = (await response.json().catch(() => ({}))) as { error?: string };
-    if (!response.ok) {
-      setError(data.error || "Failed to save settings.");
-      return;
+        const commandResponse = await fetch(`/api/guild/${guildId}/commands`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            commandName: entry.command_name,
+            enabled: entry.stagedEnabled
+          })
+        });
+
+        if (!commandResponse.ok) {
+          const commandData = (await commandResponse.json().catch(() => ({}))) as { error?: string };
+          failures.push(commandData.error || `Failed to update command: ${entry.command_name}`);
+        }
+      }
+
+      if (overview && hasPendingRaidGateChange) {
+        const gateResponse = await fetch(`/api/guild/${guildId}/raidgate`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            enabled: raidGateDraftEnabled,
+            durationSeconds: Number(raidDuration || "900"),
+            reason: raidReason
+          })
+        });
+
+        if (!gateResponse.ok) {
+          const gateData = (await gateResponse.json().catch(() => ({}))) as { error?: string };
+          failures.push(gateData.error || "Failed to update raid gate.");
+        }
+      }
+
+      await loadOverview({ silent: true });
+
+      if (failures.length > 0) {
+        setError(failures.join(" | "));
+      } else {
+        setNotice("Changes saved.");
+      }
+    } catch {
+      setError("Failed to save settings.");
+    } finally {
+      setSavingConfig(false);
     }
-
-    setNotice("Settings saved.");
-    await loadOverview();
   }
 
-  async function toggleCommand(commandName: string, enabled: boolean): Promise<void> {
+  function toggleCommand(commandName: string, enabled: boolean): void {
     setError(null);
-    const response = await fetch(`/api/guild/${guildId}/commands`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ commandName, enabled })
-    });
-
-    const data = (await response.json().catch(() => ({}))) as { error?: string };
-    if (!response.ok) {
-      setError(data.error || "Failed to update command toggle.");
-      return;
-    }
-
-    setNotice(`${commandName} ${enabled ? "enabled" : "disabled"}.`);
-    await loadOverview();
+    setCommandDraft((prev) => ({
+      ...prev,
+      [commandName]: enabled
+    }));
+    setNotice(`Staged command change: ${commandName} ${enabled ? "enabled" : "disabled"}. Save Changes to apply.`);
   }
 
   async function setupTotp(rotate = false): Promise<void> {
@@ -388,7 +509,7 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
       setNotice(data.setup?.message || "TOTP setup sent in DM.");
     }
 
-    await loadOverview();
+    await loadOverview({ silent: true });
   }
 
   async function verifyTotp(): Promise<void> {
@@ -409,27 +530,72 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
 
     setTotpCode("");
     setNotice("TOTP verified successfully.");
-    await loadOverview();
+    await loadOverview({ silent: true });
   }
 
-  async function setRaidGate(enabled: boolean): Promise<void> {
+  function setRaidGate(enabled: boolean): void {
     setError(null);
-    const response = await fetch(`/api/guild/${guildId}/raidgate`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ enabled, durationSeconds: Number(raidDuration || "900"), reason: raidReason })
-    });
+    setRaidGateDraftEnabled(enabled);
+    setRaidGateDraftDirty(true);
+    setNotice(`Staged raid gate ${enabled ? "enable" : "disable"}. Save Changes to apply.`);
+  }
 
-    const data = (await response.json().catch(() => ({}))) as { error?: string };
-    if (!response.ok) {
-      setError(data.error || "Failed to update raid gate.");
+  async function uploadCardBackground(target: CardBackgroundField, file: File | null): Promise<void> {
+    if (!file) {
+      setError("Select an image file before uploading.");
       return;
     }
 
-    setNotice(`Raid gate ${enabled ? "enabled" : "disabled"}.`);
-    await loadOverview();
+    setError(null);
+    setNotice(null);
+    setUploadingBackgroundTarget(target);
+
+    try {
+      const formData = new FormData();
+      formData.append("target", target);
+      formData.append("file", file);
+
+      const response = await fetch(`/api/guild/${guildId}/assets`, {
+        method: "POST",
+        body: formData
+      });
+
+      const data = (await response.json().catch(() => ({}))) as { error?: string; url?: string };
+      if (!response.ok || !data.url) {
+        setError(data.error || "Failed to upload background image.");
+        return;
+      }
+
+      setConfigDraft((prev) => ({
+        ...prev,
+        [target]: data.url as string
+      }));
+
+      if (target === "level_card_background_url") {
+        setLevelCardBackgroundFile(null);
+      } else {
+        setWelcomeCardBackgroundFile(null);
+      }
+
+      setNotice("Background uploaded. Save Changes to apply it.");
+    } finally {
+      setUploadingBackgroundTarget(null);
+    }
+  }
+
+  function clearCardBackground(target: CardBackgroundField): void {
+    setConfigDraft((prev) => ({
+      ...prev,
+      [target]: ""
+    }));
+
+    if (target === "level_card_background_url") {
+      setLevelCardBackgroundFile(null);
+    } else {
+      setWelcomeCardBackgroundFile(null);
+    }
+
+    setNotice("Background cleared. Save Changes to apply.");
   }
 
   function updateReactionMappingRow(index: number, patch: Partial<ReactionRoleDraftRow>): void {
@@ -527,7 +693,7 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
       setEditingReactionPanel(null);
       setReactionPanelContent("");
       setReactionPanelMappings([{ emoji: "", roleId: "" }]);
-      await loadOverview();
+      await loadOverview({ silent: true });
     } finally {
       setCreatingReactionPanel(false);
     }
@@ -560,7 +726,7 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
       }
 
       setNotice("Reaction role panel removed.");
-      await loadOverview();
+      await loadOverview({ silent: true });
     } finally {
       setRemovingReactionPanelMessageId(null);
     }
@@ -727,10 +893,31 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
           </div>
         </div>
 
-        <button className="btn primary" onClick={() => void saveConfig()}>
-          Save Settings
+        <button
+          className="btn primary"
+          onClick={() => void saveConfig()}
+          disabled={savingConfig || !hasPendingSaveChanges}
+        >
+          {savingConfig ? "Saving..." : "Save Changes"}
         </button>
       </section>
+
+      <div className="sticky-save-bar">
+        <div className="sticky-save-bar-inner">
+          <span className="muted">
+            {hasPendingSaveChanges
+              ? "Pending changes are staged across templates, cards, commands, and raid gate controls."
+              : "No staged changes. Edit any setting to enable Save Changes."}
+          </span>
+          <button
+            className="btn primary"
+            onClick={() => void saveConfig()}
+            disabled={savingConfig || !hasPendingSaveChanges}
+          >
+            {savingConfig ? "Saving..." : "Save Changes"}
+          </button>
+        </div>
+      </div>
 
       <section className="panel grid" style={{ gap: 10 }}>
         <h3>Message Templates</h3>
@@ -830,15 +1017,44 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
               }
             />
           </label>
-          <label>
-            level_card_background_url
+          <label style={{ gridColumn: "1 / -1" }}>
+            level_card_background_image
             <input
-              value={configDraft.level_card_background_url || ""}
-              onChange={(event) =>
-                setConfigDraft((prev) => ({ ...prev, level_card_background_url: event.target.value }))
-              }
-              placeholder="https://... optional"
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              onChange={(event) => setLevelCardBackgroundFile(event.target.files?.[0] || null)}
             />
+            <div className="nav-actions" style={{ marginTop: 8 }}>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => void uploadCardBackground("level_card_background_url", levelCardBackgroundFile)}
+                disabled={
+                  !levelCardBackgroundFile ||
+                  Boolean(uploadingBackgroundTarget && uploadingBackgroundTarget !== "level_card_background_url")
+                }
+              >
+                {uploadingBackgroundTarget === "level_card_background_url" ? "Uploading..." : "Upload Image"}
+              </button>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => clearCardBackground("level_card_background_url")}
+                disabled={
+                  uploadingBackgroundTarget === "level_card_background_url" ||
+                  (!configDraft.level_card_background_url && !levelCardBackgroundFile)
+                }
+              >
+                Clear
+              </button>
+            </div>
+            {configDraft.level_card_background_url ? (
+              <a href={configDraft.level_card_background_url} target="_blank" rel="noreferrer" className="muted">
+                Current background image
+              </a>
+            ) : (
+              <span className="muted">No background image uploaded.</span>
+            )}
           </label>
         </div>
 
@@ -942,15 +1158,44 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
               }
             />
           </label>
-          <label>
-            welcome_card_background_url
+          <label style={{ gridColumn: "1 / -1" }}>
+            welcome_card_background_image
             <input
-              value={configDraft.welcome_card_background_url || ""}
-              onChange={(event) =>
-                setConfigDraft((prev) => ({ ...prev, welcome_card_background_url: event.target.value }))
-              }
-              placeholder="https://... optional"
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              onChange={(event) => setWelcomeCardBackgroundFile(event.target.files?.[0] || null)}
             />
+            <div className="nav-actions" style={{ marginTop: 8 }}>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => void uploadCardBackground("welcome_card_background_url", welcomeCardBackgroundFile)}
+                disabled={
+                  !welcomeCardBackgroundFile ||
+                  Boolean(uploadingBackgroundTarget && uploadingBackgroundTarget !== "welcome_card_background_url")
+                }
+              >
+                {uploadingBackgroundTarget === "welcome_card_background_url" ? "Uploading..." : "Upload Image"}
+              </button>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => clearCardBackground("welcome_card_background_url")}
+                disabled={
+                  uploadingBackgroundTarget === "welcome_card_background_url" ||
+                  (!configDraft.welcome_card_background_url && !welcomeCardBackgroundFile)
+                }
+              >
+                Clear
+              </button>
+            </div>
+            {configDraft.welcome_card_background_url ? (
+              <a href={configDraft.welcome_card_background_url} target="_blank" rel="noreferrer" className="muted">
+                Current background image
+              </a>
+            ) : (
+              <span className="muted">No background image uploaded.</span>
+            )}
           </label>
         </div>
 
@@ -1236,7 +1481,10 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
 
       <section className="panel grid" style={{ gap: 12 }}>
         <h3>Raid Gate Actions</h3>
-        <p className="muted">Current state: {overview.raidGate.gate_active ? "active" : "inactive"}</p>
+        <p className="muted">
+          Current state: {overview.raidGate.gate_active ? "active" : "inactive"}
+          {hasPendingRaidGateChange ? ` | staged: ${raidGateDraftEnabled ? "active" : "inactive"}` : ""}
+        </p>
         <div className="field-grid">
           <label>
             durationSeconds
@@ -1248,10 +1496,10 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
           </label>
         </div>
         <div className="nav-actions">
-          <button className="btn" onClick={() => void setRaidGate(true)}>
+          <button className="btn" onClick={() => setRaidGate(true)}>
             Enable Raid Gate
           </button>
-          <button className="btn" onClick={() => void setRaidGate(false)}>
+          <button className="btn" onClick={() => setRaidGate(false)}>
             Disable Raid Gate
           </button>
         </div>
@@ -1259,22 +1507,23 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
 
       <section className="panel grid" style={{ gap: 6 }}>
         <h3>Utilities and Command Controls</h3>
-        <p className="muted">Use slider controls to enable or disable individual commands for this server.</p>
-        {commandStates.map((entry) => (
+        <p className="muted">Toggle commands here, then use Save Changes once to apply everything.</p>
+        {commandRows.map((entry) => (
           <div className="toggle-row" key={entry.command_name}>
             <div className="toggle-meta">
               <strong>{entry.command_name}</strong>
               <span className="muted">Updated {formatTimestamp(entry.updated_at)}</span>
             </div>
             <div className="toggle-control">
-              <span className={`pill ${entry.enabled ? "status-on" : "status-off"}`}>
-                {entry.enabled ? "enabled" : "disabled"}
+              <span className={`pill ${entry.stagedEnabled ? "status-on" : "status-off"}`}>
+                {entry.stagedEnabled ? "enabled" : "disabled"}
               </span>
+              {entry.dirty ? <span className="muted">staged</span> : null}
               <label className="switch" aria-label={`toggle ${entry.command_name}`}>
                 <input
                   type="checkbox"
-                  checked={entry.enabled}
-                  onChange={(event) => void toggleCommand(entry.command_name, event.target.checked)}
+                  checked={entry.stagedEnabled}
+                  onChange={(event) => toggleCommand(entry.command_name, event.target.checked)}
                 />
                 <span className="switch-track">
                   <span className="switch-thumb" />

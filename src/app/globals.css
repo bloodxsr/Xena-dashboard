@@ -470,6 +470,24 @@ input[type="range"] {
   border-left-color: var(--danger);
 }
 
+.sticky-save-bar {
+  position: sticky;
+  bottom: 12px;
+  z-index: 12;
+}
+
+.sticky-save-bar-inner {
+  border: 1px solid rgba(109, 214, 255, 0.35);
+  background: rgba(8, 12, 18, 0.92);
+  backdrop-filter: blur(8px);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -615,6 +633,11 @@ input[type="range"] {
   }
 
   .dashboard-user-wrap {
+    align-items: flex-start;
+  }
+
+  .sticky-save-bar-inner {
+    flex-direction: column;
     align-items: flex-start;
   }
 }

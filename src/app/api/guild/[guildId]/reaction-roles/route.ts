@@ -108,6 +108,23 @@ function buildPanelEmbed(content: string): { description: string; color: number;
   };
 }
 
+function parseCreatedMessageInfo(
+  raw: Record<string, unknown>,
+  fallbackChannelId: string
+): { messageId: string; channelId: string } {
+  const messageId = toSnowflake(raw?.id);
+  const resolvedChannelId = toSnowflake(raw?.channel_id) || fallbackChannelId;
+
+  if (!messageId) {
+    throw new Error("Failed to resolve created panel message id.");
+  }
+
+  return {
+    messageId,
+    channelId: resolvedChannelId
+  };
+}
+
 async function fluxerBotRequest(path: string, init: RequestInit = {}): Promise<Response> {
   if (!env.botToken) {
     throw new Error("Bot token is not configured for dashboard actions.");
@@ -131,30 +148,34 @@ async function fluxerBotRequest(path: string, init: RequestInit = {}): Promise<R
 }
 
 async function sendReactionPanelMessage(channelId: string, content: string): Promise<{ messageId: string; channelId: string }> {
-  const payload = {
+  const richPayload = {
+    content,
     embeds: [buildPanelEmbed(content)]
   };
 
-  const response = await fluxerBotRequest(`/channels/${channelId}/messages`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(payload)
-  });
+  try {
+    const response = await fluxerBotRequest(`/channels/${channelId}/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(richPayload)
+    });
 
-  const raw = (await response.json()) as Record<string, unknown>;
-  const messageId = toSnowflake(raw?.id);
-  const resolvedChannelId = toSnowflake(raw?.channel_id) || channelId;
-
-  if (!messageId) {
-    throw new Error("Failed to resolve created panel message id.");
+    const raw = (await response.json()) as Record<string, unknown>;
+    return parseCreatedMessageInfo(raw, channelId);
+  } catch {
+    // Fallback for environments where embed payload is rejected.
+    const fallbackResponse = await fluxerBotRequest(`/channels/${channelId}/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ content })
+    });
+    const raw = (await fallbackResponse.json()) as Record<string, unknown>;
+    return parseCreatedMessageInfo(raw, channelId);
   }
-
-  return {
-    messageId,
-    channelId: resolvedChannelId
-  };
 }
 
 async function addReactionToMessage(channelId: string, messageId: string, reactionRouteToken: string): Promise<void> {
@@ -176,17 +197,28 @@ async function removeOwnReactionFromMessage(channelId: string, messageId: string
 }
 
 async function updateReactionPanelMessage(channelId: string, messageId: string, content: string): Promise<void> {
-  const payload = {
+  const richPayload = {
+    content,
     embeds: [buildPanelEmbed(content)]
   };
 
-  await fluxerBotRequest(`/channels/${channelId}/messages/${messageId}`, {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(payload)
-  });
+  try {
+    await fluxerBotRequest(`/channels/${channelId}/messages/${messageId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(richPayload)
+    });
+  } catch {
+    await fluxerBotRequest(`/channels/${channelId}/messages/${messageId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ content })
+    });
+  }
 }
 
 function routeTokenFromStoredMapping(emojiDisplay: string, emojiKey: string): string | null {

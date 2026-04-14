@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 
 type DashboardDbDriver = "sqlite" | "postgres";
@@ -62,6 +63,23 @@ function parsePostgresSslMode(value: string | undefined): PostgresSslMode {
   return String(value || "disabled").trim().toLowerCase() === "required" ? "required" : "disabled";
 }
 
+function resolveDefaultBotDatabasePath(rootDir: string): string {
+  const candidates = [
+    path.resolve(rootDir, "..", "bot_js", "data", "warnings.db"),
+    path.resolve(rootDir, "..", "Xena-bot", "data", "warnings.db"),
+    path.resolve(rootDir, "..", "xena-bot", "data", "warnings.db"),
+    path.resolve(rootDir, "..", "bot", "data", "warnings.db")
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return candidates[0];
+}
+
 const processRoot = process.cwd();
 const nodeEnv = normalizeNodeEnv(process.env.NODE_ENV);
 const configuredSessionSecret = String(process.env.DASHBOARD_SESSION_SECRET || "").trim();
@@ -88,7 +106,7 @@ export const env = {
   botToken: String(process.env.FLUXER_BOT_TOKEN || process.env.BOT_TOKEN || "").trim(),
   dashboardDbDriver: parseDbDriver(process.env.DASHBOARD_DB_DRIVER),
   botDatabasePath: String(
-    process.env.BOT_DB_PATH || path.resolve(processRoot, "..", "bot_js", "data", "warnings.db")
+    process.env.BOT_DB_PATH || resolveDefaultBotDatabasePath(processRoot)
   ).trim(),
   postgresHost: String(process.env.POSTGRES_HOST || "").trim(),
   postgresPort: parseInteger(process.env.POSTGRES_PORT, 5432, 1, 65535),
@@ -103,6 +121,13 @@ export const env = {
   totpVerifyWindowSteps: parseInteger(process.env.TOTP_VERIFY_WINDOW_STEPS, 1, 0, 5),
   totpAuthWindowDays: parseInteger(process.env.TOTP_AUTH_WINDOW_DAYS, 30, 1, 365)
 };
+
+if (!process.env.BOT_DB_PATH && !fs.existsSync(env.botDatabasePath)) {
+  console.warn(
+    `BOT_DB_PATH is not set and default DB was not found at ${env.botDatabasePath}. ` +
+      "Set BOT_DB_PATH to the bot warnings.db file so reaction roles and guild config sync correctly."
+  );
+}
 
 function assertProductionSecurityConfig(): void {
   if (env.nodeEnv !== "production") {
