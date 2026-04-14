@@ -8,6 +8,7 @@ import {
   listTopLevelMembers,
   listWarningCounts
 } from "@/lib/db";
+import { fetchGuildChannels } from "@/lib/fluxer";
 import { requireGuildContext } from "@/lib/request-auth";
 import { resolveTotpAuthorization } from "@/lib/totp";
 
@@ -23,14 +24,15 @@ export async function GET(
     return auth;
   }
 
-  const [config, raidGate, warnings, commandStates, topMembers, trackedMembers, totpRecord] = await Promise.all([
+  const [config, raidGate, warnings, commandStates, topMembers, trackedMembers, totpRecord, channels] = await Promise.all([
     getGuildConfig(guildId),
     getRaidGateState(guildId),
     listWarningCounts(guildId, 50),
     getCommandStates(guildId),
     listTopLevelMembers(guildId, 3),
     countTrackedLevelMembers(guildId),
-    getStaffTotpAuth(guildId, auth.session.userId)
+    getStaffTotpAuth(guildId, auth.session.userId),
+    fetchGuildChannels(guildId).catch(() => [])
   ]);
   const totp = resolveTotpAuthorization(totpRecord);
 
@@ -42,6 +44,7 @@ export async function GET(
     commandStates,
     topMembers,
     trackedMembers,
+    channels,
     totp
   });
 }

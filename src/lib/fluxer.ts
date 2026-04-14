@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { env } from "@/lib/env";
-import type { FluxerGuild, FluxerUser } from "@/lib/types";
+import type { FluxerGuild, FluxerGuildChannel, FluxerUser } from "@/lib/types";
 
 const PERMISSION_ADMINISTRATOR = 0x8n;
 const PERMISSION_MANAGE_GUILD = 0x20n;
@@ -62,6 +62,29 @@ function normalizeUser(raw: unknown): FluxerUser {
     username,
     globalName,
     avatarUrl
+  };
+}
+
+function normalizeGuildChannel(raw: unknown, guildId: string): FluxerGuildChannel | null {
+  const item = raw as Record<string, unknown>;
+  const id = toSnowflake(item?.id);
+  const normalizedGuildId = toSnowflake(item?.guild_id) || guildId;
+  const name = String(item?.name || "").trim();
+
+  if (!id || !normalizedGuildId || !name) {
+    return null;
+  }
+
+  const typeNumber = Number(item?.type);
+  const positionNumber = Number(item?.position);
+
+  return {
+    id,
+    guildId: normalizedGuildId,
+    name,
+    type: Number.isFinite(typeNumber) ? Math.trunc(typeNumber) : 0,
+    position: Number.isFinite(positionNumber) ? Math.trunc(positionNumber) : 0,
+    parentId: toSnowflake(item?.parent_id)
   };
 }
 
@@ -157,6 +180,37 @@ export async function fetchBotGuilds(botToken: string): Promise<FluxerGuild[]> {
 
   const list = Array.isArray(raw) ? raw : [];
   return list.map(normalizeGuild).filter((item): item is FluxerGuild => Boolean(item));
+}
+
+export async function fetchGuildChannels(guildId: string, botToken = env.botToken): Promise<FluxerGuildChannel[]> {
+  const normalizedGuildId = toSnowflake(guildId);
+  if (!botToken || !normalizedGuildId) {
+    return [];
+  }
+
+  const raw = await fetchJson<unknown>(`${env.fluxerApiBaseUrl}/guilds/${normalizedGuildId}/channels`, {
+    headers: {
+      Authorization: `Bot ${botToken}`
+    },
+    cache: "no-store"
+  });
+
+  const list = Array.isArray(raw)
+    ? raw
+    : typeof raw === "object" && raw !== null && Array.isArray((raw as Record<string, unknown>).channels)
+      ? ((raw as Record<string, unknown>).channels as unknown[])
+      : [];
+
+  return list
+    .map((entry) => normalizeGuildChannel(entry, normalizedGuildId))
+    .filter((channel): channel is FluxerGuildChannel => Boolean(channel))
+    .sort((a, b) => {
+      if (a.position !== b.position) {
+        return a.position - b.position;
+      }
+
+      return a.name.localeCompare(b.name);
+    });
 }
 
 export function hasGuildManagePermission(guild: FluxerGuild): boolean {

@@ -98,6 +98,19 @@ main {
   font-weight: 650;
 }
 
+.panel h4 {
+  margin: 0 0 8px;
+  font-weight: 600;
+  font-size: 0.96rem;
+}
+
+.panel-subsection {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
 .field-grid {
   display: grid;
   gap: 12px;
@@ -127,6 +140,10 @@ select {
 textarea {
   min-height: 100px;
   resize: vertical;
+}
+
+.message-template-grid {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
 .hero {
@@ -186,11 +203,97 @@ textarea {
 
 .toggle-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
   border-bottom: 1px solid var(--line);
   padding: 9px 0;
+}
+
+.toggle-meta {
+  display: grid;
+  gap: 4px;
+}
+
+.toggle-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.status-on {
+  border-color: rgba(140, 255, 208, 0.45);
+  color: var(--success);
+}
+
+.status-off {
+  border-color: rgba(255, 107, 107, 0.45);
+  color: var(--danger);
+}
+
+.switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switch-track {
+  width: 46px;
+  height: 26px;
+  border-radius: 999px;
+  background: #1d1d20;
+  border: 1px solid #34343a;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.switch-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: #c7c7cb;
+  transform: translateX(0);
+  transition: transform 150ms ease, background 150ms ease;
+}
+
+.switch input:checked + .switch-track {
+  background: rgba(140, 255, 208, 0.2);
+  border-color: rgba(140, 255, 208, 0.6);
+}
+
+.switch input:checked + .switch-track .switch-thumb {
+  transform: translateX(20px);
+  background: var(--success);
+}
+
+.stats-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+  margin: 4px 0 10px;
+}
+
+.stat-chip {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  display: grid;
+  gap: 6px;
+}
+
+.stat-chip strong {
+  font-size: 1.15rem;
 }
 
 .pill {
@@ -214,5 +317,14 @@ textarea {
   .hero {
     grid-template-columns: 1fr;
     gap: 18px;
+  }
+
+  .toggle-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .toggle-control {
+    justify-content: space-between;
   }
 }

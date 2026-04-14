@@ -12,6 +12,9 @@ import type {
 
 const DEFAULT_WELCOME_MESSAGE_TEMPLATE = "Welcome {user.mention} to {guild.name}.";
 const DEFAULT_LEVELUP_MESSAGE_TEMPLATE = "Level Up: {user.mention} reached level {level}. Rank #{rank}.";
+const DEFAULT_KICK_MESSAGE_TEMPLATE = "You were kicked from {guild.name}. Reason: {reason}.";
+const DEFAULT_BAN_MESSAGE_TEMPLATE = "You were banned from {guild.name}. Reason: {reason}.";
+const DEFAULT_MUTE_MESSAGE_TEMPLATE = "You were muted in {guild.name}. Reason: {reason}.";
 
 export const KNOWN_TOGGLEABLE_COMMANDS: string[] = [
   "addbadword",
@@ -162,6 +165,9 @@ function initializeSchema(database: Database.Database): void {
       leveling_channel_id INTEGER,
       welcome_message_template TEXT,
       levelup_message_template TEXT,
+      kick_message_template TEXT,
+      ban_message_template TEXT,
+      mute_message_template TEXT,
       admin_role_name TEXT NOT NULL DEFAULT 'Admin',
       mod_role_name TEXT NOT NULL DEFAULT 'Moderator',
       sync_mode TEXT NOT NULL DEFAULT 'global',
@@ -225,6 +231,9 @@ function initializeSchema(database: Database.Database): void {
 
   ensureTableColumn(database, "guild_config", "welcome_message_template", "TEXT");
   ensureTableColumn(database, "guild_config", "levelup_message_template", "TEXT");
+  ensureTableColumn(database, "guild_config", "kick_message_template", "TEXT");
+  ensureTableColumn(database, "guild_config", "ban_message_template", "TEXT");
+  ensureTableColumn(database, "guild_config", "mute_message_template", "TEXT");
 
   database
     .prepare(
@@ -236,6 +245,21 @@ function initializeSchema(database: Database.Database): void {
       "UPDATE guild_config SET levelup_message_template = ? WHERE levelup_message_template IS NULL OR TRIM(levelup_message_template) = ''"
     )
     .run(DEFAULT_LEVELUP_MESSAGE_TEMPLATE);
+  database
+    .prepare(
+      "UPDATE guild_config SET kick_message_template = ? WHERE kick_message_template IS NULL OR TRIM(kick_message_template) = ''"
+    )
+    .run(DEFAULT_KICK_MESSAGE_TEMPLATE);
+  database
+    .prepare(
+      "UPDATE guild_config SET ban_message_template = ? WHERE ban_message_template IS NULL OR TRIM(ban_message_template) = ''"
+    )
+    .run(DEFAULT_BAN_MESSAGE_TEMPLATE);
+  database
+    .prepare(
+      "UPDATE guild_config SET mute_message_template = ? WHERE mute_message_template IS NULL OR TRIM(mute_message_template) = ''"
+    )
+    .run(DEFAULT_MUTE_MESSAGE_TEMPLATE);
 }
 
 function ensureGuildConfig(guildId: string): void {
@@ -279,6 +303,9 @@ export function getGuildConfig(guildId: string): GuildConfigRecord {
     leveling_channel_id: toSnowflake(row.leveling_channel_id),
     welcome_message_template: normalizeTemplateText(row.welcome_message_template, DEFAULT_WELCOME_MESSAGE_TEMPLATE),
     levelup_message_template: normalizeTemplateText(row.levelup_message_template, DEFAULT_LEVELUP_MESSAGE_TEMPLATE),
+    kick_message_template: normalizeTemplateText(row.kick_message_template, DEFAULT_KICK_MESSAGE_TEMPLATE),
+    ban_message_template: normalizeTemplateText(row.ban_message_template, DEFAULT_BAN_MESSAGE_TEMPLATE),
+    mute_message_template: normalizeTemplateText(row.mute_message_template, DEFAULT_MUTE_MESSAGE_TEMPLATE),
     admin_role_name: String(row.admin_role_name || "Admin"),
     mod_role_name: String(row.mod_role_name || "Moderator"),
     verification_url: row.verification_url ? String(row.verification_url) : null,
@@ -304,6 +331,9 @@ export function updateGuildConfig(guildId: string, updates: Partial<GuildConfigR
     "leveling_channel_id",
     "welcome_message_template",
     "levelup_message_template",
+    "kick_message_template",
+    "ban_message_template",
+    "mute_message_template",
     "admin_role_name",
     "mod_role_name",
     "verification_url",
@@ -334,6 +364,21 @@ export function updateGuildConfig(guildId: string, updates: Partial<GuildConfigR
 
     if (key === "levelup_message_template") {
       normalized[key] = normalizeTemplateText(rawValue, DEFAULT_LEVELUP_MESSAGE_TEMPLATE);
+      continue;
+    }
+
+    if (key === "kick_message_template") {
+      normalized[key] = normalizeTemplateText(rawValue, DEFAULT_KICK_MESSAGE_TEMPLATE);
+      continue;
+    }
+
+    if (key === "ban_message_template") {
+      normalized[key] = normalizeTemplateText(rawValue, DEFAULT_BAN_MESSAGE_TEMPLATE);
+      continue;
+    }
+
+    if (key === "mute_message_template") {
+      normalized[key] = normalizeTemplateText(rawValue, DEFAULT_MUTE_MESSAGE_TEMPLATE);
       continue;
     }
 

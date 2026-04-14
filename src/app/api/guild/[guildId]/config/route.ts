@@ -57,6 +57,14 @@ export async function POST(
       typeof updates.welcome_message_template === "string" ? updates.welcome_message_template : undefined,
     levelup_message_template:
       typeof updates.levelup_message_template === "string" ? updates.levelup_message_template : undefined,
+    kick_message_template:
+      typeof updates.kick_message_template === "string" ? updates.kick_message_template : undefined,
+    ban_message_template:
+      typeof updates.ban_message_template === "string" ? updates.ban_message_template : undefined,
+    mute_message_template:
+      typeof updates.mute_message_template === "string" ? updates.mute_message_template : undefined,
+    admin_role_name: typeof updates.admin_role_name === "string" ? updates.admin_role_name : undefined,
+    mod_role_name: typeof updates.mod_role_name === "string" ? updates.mod_role_name : undefined,
     verification_url: typeof updates.verification_url === "string" ? updates.verification_url : undefined,
     raid_gate_threshold:
       updates.raid_gate_threshold == null ? undefined : Number(updates.raid_gate_threshold || 0),

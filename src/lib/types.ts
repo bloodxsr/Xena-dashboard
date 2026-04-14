@@ -12,6 +12,15 @@ export interface FluxerGuild {
   permissions: string;
 }
 
+export interface FluxerGuildChannel {
+  id: string;
+  guildId: string;
+  name: string;
+  type: number;
+  position: number;
+  parentId: string | null;
+}
+
 export interface DashboardSession {
   userId: string;
   username: string;
@@ -32,6 +41,9 @@ export interface GuildConfigRecord {
   leveling_channel_id: string | null;
   welcome_message_template: string;
   levelup_message_template: string;
+  kick_message_template: string;
+  ban_message_template: string;
+  mute_message_template: string;
   admin_role_name: string;
   mod_role_name: string;
   verification_url: string | null;

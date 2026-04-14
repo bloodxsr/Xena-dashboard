@@ -2,6 +2,19 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+const CHANNEL_FIELD_DEFINITIONS = [
+  { key: "log_channel_id", label: "Log Channel" },
+  { key: "welcome_channel_id", label: "Welcome Channel" },
+  { key: "rules_channel_id", label: "Rules Channel" },
+  { key: "chat_channel_id", label: "Chat Channel" },
+  { key: "help_channel_id", label: "Help Channel" },
+  { key: "about_channel_id", label: "About Channel" },
+  { key: "perks_channel_id", label: "Perks Channel" },
+  { key: "leveling_channel_id", label: "Leveling Channel" }
+] as const;
+
+const TEXT_LIKE_CHANNEL_TYPES = new Set([0, 5, 15]);
+
 type OverviewPayload = {
   guild: {
     id: string;
@@ -25,6 +38,11 @@ type OverviewPayload = {
     join_gate_mode: "timeout" | "kick";
     welcome_message_template: string;
     levelup_message_template: string;
+    kick_message_template: string;
+    ban_message_template: string;
+    mute_message_template: string;
+    admin_role_name: string;
+    mod_role_name: string;
   };
   raidGate: {
     gate_active: boolean;
@@ -46,6 +64,14 @@ type OverviewPayload = {
     level: number;
     xp: number;
   }>;
+  channels: Array<{
+    id: string;
+    guildId: string;
+    name: string;
+    type: number;
+    position: number;
+    parentId: string | null;
+  }>;
   trackedMembers: number;
   totp: {
     enrolled: boolean;
@@ -61,6 +87,15 @@ function toInputValue(value: string | null | undefined): string {
 
 function numberInput(value: number): string {
   return Number.isFinite(value) ? String(value) : "";
+}
+
+function formatTimestamp(value: string | null | undefined): string {
+  const date = new Date(String(value || ""));
+  if (Number.isNaN(date.getTime())) {
+    return "Unknown";
+  }
+
+  return date.toLocaleString();
 }
 
 export function GuildConsoleClient({ guildId }: { guildId: string }) {
@@ -102,7 +137,12 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
         gate_duration_seconds: numberInput(payload.config.gate_duration_seconds),
         join_gate_mode: payload.config.join_gate_mode,
         welcome_message_template: payload.config.welcome_message_template,
-        levelup_message_template: payload.config.levelup_message_template
+        levelup_message_template: payload.config.levelup_message_template,
+        kick_message_template: payload.config.kick_message_template,
+        ban_message_template: payload.config.ban_message_template,
+        mute_message_template: payload.config.mute_message_template,
+        admin_role_name: payload.config.admin_role_name,
+        mod_role_name: payload.config.mod_role_name
       });
       setRaidDuration(numberInput(payload.config.gate_duration_seconds));
     } catch (loadError) {
@@ -117,6 +157,21 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
   }, [loadOverview]);
 
   const commandStates = useMemo(() => overview?.commandStates || [], [overview?.commandStates]);
+  const assignableChannels = useMemo(() => {
+    const channels = overview?.channels || [];
+    const filtered = channels.filter((channel) => TEXT_LIKE_CHANNEL_TYPES.has(channel.type));
+    return filtered.length > 0 ? filtered : channels;
+  }, [overview?.channels]);
+  const warningSummary = useMemo(() => {
+    const warnings = overview?.warnings || [];
+    const total = warnings.reduce((sum, item) => sum + Math.max(0, Number(item.warning_count || 0)), 0);
+    const highest = warnings.reduce((max, item) => Math.max(max, Math.max(0, Number(item.warning_count || 0))), 0);
+    return {
+      warnedUsers: warnings.length,
+      totalWarnings: total,
+      highestCount: highest
+    };
+  }, [overview?.warnings]);
 
   async function saveConfig(): Promise<void> {
     setNotice(null);
@@ -294,80 +349,113 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
       </section>
 
       <section className="panel grid" style={{ gap: 12 }}>
-        <h3>Channel Restrictions and Core Settings</h3>
-        <div className="field-grid">
-          {[
-            "log_channel_id",
-            "welcome_channel_id",
-            "rules_channel_id",
-            "chat_channel_id",
-            "help_channel_id",
-            "about_channel_id",
-            "perks_channel_id",
-            "leveling_channel_id"
-          ].map((field) => (
-            <label key={field}>
-              {field}
+        <h3>Server Configuration</h3>
+
+        <div className="panel-subsection">
+          <h4>Admin Settings</h4>
+          <p className="muted">Control role labels and verification endpoint details for staff tools.</p>
+          <div className="field-grid">
+            <label>
+              admin_role_name
               <input
-                value={configDraft[field] || ""}
-                onChange={(event) => setConfigDraft((prev) => ({ ...prev, [field]: event.target.value.trim() }))}
-                placeholder="channel id or blank"
+                value={configDraft.admin_role_name || ""}
+                onChange={(event) => setConfigDraft((prev) => ({ ...prev, admin_role_name: event.target.value }))}
+                placeholder="Admin"
               />
             </label>
-          ))}
+            <label>
+              mod_role_name
+              <input
+                value={configDraft.mod_role_name || ""}
+                onChange={(event) => setConfigDraft((prev) => ({ ...prev, mod_role_name: event.target.value }))}
+                placeholder="Moderator"
+              />
+            </label>
+            <label>
+              verification_url
+              <input
+                value={configDraft.verification_url || ""}
+                onChange={(event) => setConfigDraft((prev) => ({ ...prev, verification_url: event.target.value }))}
+                placeholder="https://... or blank"
+              />
+            </label>
+          </div>
         </div>
 
-        <div className="field-grid">
-          <label>
-            verification_url
-            <input
-              value={configDraft.verification_url || ""}
-              onChange={(event) => setConfigDraft((prev) => ({ ...prev, verification_url: event.target.value }))}
-              placeholder="https://... or blank"
-            />
-          </label>
-          <label>
-            raid_gate_threshold
-            <input
-              value={configDraft.raid_gate_threshold || "0.72"}
-              onChange={(event) => setConfigDraft((prev) => ({ ...prev, raid_gate_threshold: event.target.value }))}
-            />
-          </label>
-          <label>
-            raid_monitor_window_seconds
-            <input
-              value={configDraft.raid_monitor_window_seconds || "90"}
-              onChange={(event) =>
-                setConfigDraft((prev) => ({ ...prev, raid_monitor_window_seconds: event.target.value }))
-              }
-            />
-          </label>
-          <label>
-            raid_join_rate_threshold
-            <input
-              value={configDraft.raid_join_rate_threshold || "8"}
-              onChange={(event) =>
-                setConfigDraft((prev) => ({ ...prev, raid_join_rate_threshold: event.target.value }))
-              }
-            />
-          </label>
-          <label>
-            gate_duration_seconds
-            <input
-              value={configDraft.gate_duration_seconds || "900"}
-              onChange={(event) => setConfigDraft((prev) => ({ ...prev, gate_duration_seconds: event.target.value }))}
-            />
-          </label>
-          <label>
-            join_gate_mode
-            <select
-              value={configDraft.join_gate_mode || "timeout"}
-              onChange={(event) => setConfigDraft((prev) => ({ ...prev, join_gate_mode: event.target.value }))}
-            >
-              <option value="timeout">timeout</option>
-              <option value="kick">kick</option>
-            </select>
-          </label>
+        <div className="panel-subsection">
+          <h4>Channel Mapping</h4>
+          <p className="muted">Select channels from your server directly instead of manually pasting IDs.</p>
+          <div className="field-grid">
+            {CHANNEL_FIELD_DEFINITIONS.map((field) => (
+              <label key={field.key}>
+                {field.label}
+                <select
+                  value={configDraft[field.key] || ""}
+                  onChange={(event) => setConfigDraft((prev) => ({ ...prev, [field.key]: event.target.value }))}
+                >
+                  <option value="">none</option>
+                  {assignableChannels.map((channel) => (
+                    <option key={`${field.key}-${channel.id}`} value={channel.id}>
+                      #{channel.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          </div>
+          {assignableChannels.length === 0 ? (
+            <p className="muted">No channels available. Ensure the bot token is set so the dashboard can fetch guild channels.</p>
+          ) : null}
+        </div>
+
+        <div className="panel-subsection">
+          <h4>Moderation Thresholds</h4>
+          <div className="field-grid">
+            <label>
+              raid_gate_threshold
+              <input
+                value={configDraft.raid_gate_threshold || "0.72"}
+                onChange={(event) => setConfigDraft((prev) => ({ ...prev, raid_gate_threshold: event.target.value }))}
+              />
+            </label>
+            <label>
+              raid_monitor_window_seconds
+              <input
+                value={configDraft.raid_monitor_window_seconds || "90"}
+                onChange={(event) =>
+                  setConfigDraft((prev) => ({ ...prev, raid_monitor_window_seconds: event.target.value }))
+                }
+              />
+            </label>
+            <label>
+              raid_join_rate_threshold
+              <input
+                value={configDraft.raid_join_rate_threshold || "8"}
+                onChange={(event) =>
+                  setConfigDraft((prev) => ({ ...prev, raid_join_rate_threshold: event.target.value }))
+                }
+              />
+            </label>
+            <label>
+              gate_duration_seconds
+              <input
+                value={configDraft.gate_duration_seconds || "900"}
+                onChange={(event) =>
+                  setConfigDraft((prev) => ({ ...prev, gate_duration_seconds: event.target.value }))
+                }
+              />
+            </label>
+            <label>
+              join_gate_mode
+              <select
+                value={configDraft.join_gate_mode || "timeout"}
+                onChange={(event) => setConfigDraft((prev) => ({ ...prev, join_gate_mode: event.target.value }))}
+              >
+                <option value="timeout">timeout</option>
+                <option value="kick">kick</option>
+              </select>
+            </label>
+          </div>
         </div>
 
         <button className="btn primary" onClick={() => void saveConfig()}>
@@ -376,26 +464,52 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
       </section>
 
       <section className="panel grid" style={{ gap: 10 }}>
-        <h3>Editable Messages</h3>
-        <p className="muted">You can use placeholders like {"{user.mention}"}, {"{guild.name}"}, {"{level}"}, {"{rank}"}.</p>
-        <label>
-          welcome_message_template
-          <textarea
-            value={configDraft.welcome_message_template || ""}
-            onChange={(event) =>
-              setConfigDraft((prev) => ({ ...prev, welcome_message_template: event.target.value }))
-            }
-          />
-        </label>
-        <label>
-          levelup_message_template
-          <textarea
-            value={configDraft.levelup_message_template || ""}
-            onChange={(event) =>
-              setConfigDraft((prev) => ({ ...prev, levelup_message_template: event.target.value }))
-            }
-          />
-        </label>
+        <h3>Message Templates</h3>
+        <p className="muted">
+          You can use placeholders like {"{user.mention}"}, {"{guild.name}"}, {"{reason}"}, {"{level}"}, and
+          {" {rank}"}.
+        </p>
+        <div className="field-grid message-template-grid">
+          <label>
+            welcome_message_template
+            <textarea
+              value={configDraft.welcome_message_template || ""}
+              onChange={(event) =>
+                setConfigDraft((prev) => ({ ...prev, welcome_message_template: event.target.value }))
+              }
+            />
+          </label>
+          <label>
+            levelup_message_template
+            <textarea
+              value={configDraft.levelup_message_template || ""}
+              onChange={(event) =>
+                setConfigDraft((prev) => ({ ...prev, levelup_message_template: event.target.value }))
+              }
+            />
+          </label>
+          <label>
+            kick_message_template
+            <textarea
+              value={configDraft.kick_message_template || ""}
+              onChange={(event) => setConfigDraft((prev) => ({ ...prev, kick_message_template: event.target.value }))}
+            />
+          </label>
+          <label>
+            ban_message_template
+            <textarea
+              value={configDraft.ban_message_template || ""}
+              onChange={(event) => setConfigDraft((prev) => ({ ...prev, ban_message_template: event.target.value }))}
+            />
+          </label>
+          <label>
+            mute_message_template
+            <textarea
+              value={configDraft.mute_message_template || ""}
+              onChange={(event) => setConfigDraft((prev) => ({ ...prev, mute_message_template: event.target.value }))}
+            />
+          </label>
+        </div>
       </section>
 
       <section className="panel grid" style={{ gap: 12 }}>
@@ -423,43 +537,69 @@ export function GuildConsoleClient({ guildId }: { guildId: string }) {
 
       <section className="panel grid" style={{ gap: 6 }}>
         <h3>Utilities and Command Controls</h3>
-        <p className="muted">Enable or disable individual commands for this server.</p>
+        <p className="muted">Use slider controls to enable or disable individual commands for this server.</p>
         {commandStates.map((entry) => (
           <div className="toggle-row" key={entry.command_name}>
-            <span>{entry.command_name}</span>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text)" }}>
-              <input
-                type="checkbox"
-                checked={entry.enabled}
-                onChange={(event) => void toggleCommand(entry.command_name, event.target.checked)}
-              />
-              {entry.enabled ? "enabled" : "disabled"}
-            </label>
+            <div className="toggle-meta">
+              <strong>{entry.command_name}</strong>
+              <span className="muted">Updated {formatTimestamp(entry.updated_at)}</span>
+            </div>
+            <div className="toggle-control">
+              <span className={`pill ${entry.enabled ? "status-on" : "status-off"}`}>
+                {entry.enabled ? "enabled" : "disabled"}
+              </span>
+              <label className="switch" aria-label={`toggle ${entry.command_name}`}>
+                <input
+                  type="checkbox"
+                  checked={entry.enabled}
+                  onChange={(event) => void toggleCommand(entry.command_name, event.target.checked)}
+                />
+                <span className="switch-track">
+                  <span className="switch-thumb" />
+                </span>
+              </label>
+            </div>
           </div>
         ))}
       </section>
 
       <section className="panel">
         <h3>Warning Counts</h3>
+        <div className="stats-strip">
+          <div className="stat-chip">
+            <span className="muted">Members With Warnings</span>
+            <strong>{warningSummary.warnedUsers}</strong>
+          </div>
+          <div className="stat-chip">
+            <span className="muted">Total Warning Count</span>
+            <strong>{warningSummary.totalWarnings}</strong>
+          </div>
+          <div className="stat-chip">
+            <span className="muted">Highest User Count</span>
+            <strong>{warningSummary.highestCount}</strong>
+          </div>
+        </div>
         <table className="table">
           <thead>
             <tr>
+              <th>#</th>
               <th>User</th>
-              <th>Warnings</th>
+              <th>Warning Count</th>
               <th>Updated</th>
             </tr>
           </thead>
           <tbody>
-            {overview.warnings.map((warning) => (
+            {overview.warnings.map((warning, index) => (
               <tr key={warning.user_id}>
+                <td>{index + 1}</td>
                 <td>&lt;@{warning.user_id}&gt;</td>
-                <td>{warning.warning_count}</td>
-                <td>{warning.updated_at}</td>
+                <td>{warning.warning_count} warning(s)</td>
+                <td>{formatTimestamp(warning.updated_at)}</td>
               </tr>
             ))}
             {overview.warnings.length === 0 ? (
               <tr>
-                <td colSpan={3} className="muted">
+                <td colSpan={4} className="muted">
                   No warning records yet.
                 </td>
               </tr>
